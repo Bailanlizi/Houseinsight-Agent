@@ -9,7 +9,13 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel, Field
 
-from server.agent.prompts import ANSWER_PROMPT, OBSERVE_PROMPT, PLAN_PROMPT, SYSTEM_ZH
+from server.agent.prompts import (
+    ANSWER_PROMPT,
+    INTENT_AND_FILTER_GUIDE,
+    OBSERVE_PROMPT,
+    PLAN_PROMPT,
+    SYSTEM_ZH,
+)
 from server.agent.state import AgentState, ExecutionRecord, PlanStepDict
 from server.core.config import get_settings
 from server.core.llm import get_chat_model
@@ -80,19 +86,85 @@ def explore_node(state: AgentState, config: RunnableConfig) -> dict[str, Any]:
     }
 
 
+def _house_info_column(cols: list[str]) -> str | None:
+    if "房屋信息" in cols:
+        return "房屋信息"
+    for c in cols:
+        if "房屋" in c and "信息" in c:
+            return c
+    return None
+
+
+def _parse_house_done(hist: list[ExecutionRecord], col: str | None) -> bool:
+    if not col:
+        return True
+    return any(
+        h.get("tool") == "parse_house_info_column"
+        and h.get("ok")
+        and (h.get("arguments") or {}).get("column") == col
+        for h in hist
+    )
+
+
+def _columns_and_profile(state: AgentState) -> tuple[list[str], dict[str, Any]]:
+    prof = state.get("data_profile", {}) or {}
+    return list(prof.get("columns", []) or []), prof
+
+
+def _price_like_column(cols: list[str]) -> str | None:
+    return next(
+        (c for c in cols if any(k in c.lower() for k in ("价", "price", "总价"))),
+        None,
+    )
+
+
+def _group_and_value_columns(cols: list[str]) -> tuple[str | None, str | None]:
+    group_like = next(
+        (c for c in cols if any(k in c for k in ("区", "区域", "地段", "location", "区县"))),
+        None,
+    )
+    val_col = next((c for c in cols if any(k in c.lower() for k in ("价", "price", "均价"))), None)
+    return group_like, val_col
+
+
+def _parse_succeeded_for_column(hist: list[ExecutionRecord], col: str) -> bool:
+    return any(
+        h.get("tool") == "parse_numeric_column"
+        and h.get("ok")
+        and (h.get("arguments") or {}).get("column") == col
+        for h in hist
+    )
+
+
+def _needs_price_parse(prof: dict[str, Any], hist: list[ExecutionRecord], cols: list[str]) -> bool:
+    price_like = _price_like_column(cols)
+    if not price_like:
+        return False
+    dtypes = prof.get("dtypes", {})
+    if dtypes.get(price_like) in ("float64", "int64", "Int64"):
+        return False
+    return not _parse_succeeded_for_column(hist, price_like)
+
+
 def _mock_plan(state: AgentState) -> list[PlanStepDict]:
     hist = state.get("execution_history", [])
-    prof = state.get("data_profile", {}) or {}
-    cols: list[str] = list(prof.get("columns", []) or [])
+    cols, prof = _columns_and_profile(state)
 
     if not any(h.get("tool") == "get_basic_stats" for h in hist):
         return [{"tool": "get_basic_stats", "arguments": {}, "rationale": "先了解数值列分布"}]
 
-    price_like = next((c for c in cols if any(k in c.lower() for k in ("价", "price", "总价"))), None)
-    if price_like and not any(
-        h.get("tool") == "parse_numeric_column" and (h.get("arguments") or {}).get("column") == price_like
-        for h in hist
-    ):
+    hi = _house_info_column(cols)
+    if hi and not _parse_house_done(hist, hi):
+        return [
+            {
+                "tool": "parse_house_info_column",
+                "arguments": {"column": hi},
+                "rationale": "解析房屋信息中的户型/面积/装修等字段",
+            }
+        ]
+
+    price_like = _price_like_column(cols)
+    if price_like and not _parse_succeeded_for_column(hist, price_like):
         dtypes = prof.get("dtypes", {})
         if dtypes.get(price_like) not in ("float64", "int64", "Int64"):
             return [
@@ -103,8 +175,7 @@ def _mock_plan(state: AgentState) -> list[PlanStepDict]:
                 }
             ]
 
-    group_like = next((c for c in cols if any(k in c for k in ("区", "区域", "地段", "location", "区县"))), None)
-    val_col = next((c for c in cols if any(k in c.lower() for k in ("价", "price", "均价"))), None)
+    group_like, val_col = _group_and_value_columns(cols)
     if group_like and val_col and not any(h.get("tool") == "group_by_summary" for h in hist):
         return [
             {
@@ -122,11 +193,14 @@ def _mock_plan(state: AgentState) -> list[PlanStepDict]:
 
 def _llm_plan(state: AgentState) -> list[PlanStepDict]:
     tool_names = "\n".join(f"- {k}" for k in sorted(TOOL_REGISTRY))
-    prompt = PLAN_PROMPT.format(
-        tool_names=tool_names,
-        profile_excerpt=_profile_excerpt(state.get("data_profile", {})),
-        goal=state.get("goal", ""),
-        history_excerpt=_history_excerpt(state.get("execution_history", [])),
+    prompt = (
+        PLAN_PROMPT.format(
+            tool_names=tool_names,
+            profile_excerpt=_profile_excerpt(state.get("data_profile", {})),
+            goal=state.get("goal", ""),
+            history_excerpt=_history_excerpt(state.get("execution_history", [])),
+        )
+        + INTENT_AND_FILTER_GUIDE
     )
     model = get_chat_model()
     structured = model.with_structured_output(PlanLLMOutput)
@@ -219,14 +293,45 @@ def execute_node(state: AgentState, config: RunnableConfig) -> dict[str, Any]:
 
 
 def _mock_observe(state: AgentState) -> dict[str, Any]:
+    """与 _mock_plan 对齐的里程碑式结束条件（SPEC §13 自主性）。"""
     hist = state.get("execution_history", [])
     last = hist[-1] if hist else None
+    cols, prof = _columns_and_profile(state)
+    plan = state.get("plan") or []
+
     if last and last.get("ok") is False:
         return {"should_finish": True, "stop_reason": "error", "notes": "工具执行失败，结束循环。"}
+
+    if any(h.get("tool") == "group_by_summary" and h.get("ok") for h in hist):
+        return {"should_finish": True, "stop_reason": "completed", "notes": "已完成分组聚合（mock）。"}
+
+    if any(h.get("tool") == "top_k_values" and h.get("ok") for h in hist):
+        return {"should_finish": True, "stop_reason": "completed", "notes": "已完成高频值统计（mock）。"}
+
+    # execute 每步会清空剩余 plan；空队列不代表任务结束，需看 _mock_plan 是否还有后续
+    if not plan:
+        if not hist:
+            return {"should_finish": False, "stop_reason": "completed", "notes": "等待首轮计划。"}
+        if last and last.get("ok") and not _mock_plan(state):
+            return {"should_finish": True, "stop_reason": "completed", "notes": "无后续步骤（mock）。"}
+        return {"should_finish": False, "stop_reason": "completed", "notes": "本轮计划已消费，继续规划。"}
+
     if last and last.get("tool") == "get_basic_stats" and last.get("ok"):
-        return {"should_finish": True, "stop_reason": "completed", "notes": "已完成基础统计（mock）。"}
-    if not state.get("plan"):
-        return {"should_finish": True, "stop_reason": "completed", "notes": "计划已空（mock）。"}
+        return {"should_finish": False, "stop_reason": "completed", "notes": "基础统计完成，继续清洗/分析。"}
+
+    if last and last.get("tool") == "parse_house_info_column" and last.get("ok"):
+        return {"should_finish": False, "stop_reason": "completed", "notes": "房屋信息解析完成，继续价格/筛选。"}
+
+    if last and last.get("tool") == "parse_numeric_column" and last.get("ok"):
+        return {"should_finish": False, "stop_reason": "completed", "notes": "价格列解析完成，继续聚合。"}
+
+    if _needs_price_parse(prof, hist, cols):
+        return {"should_finish": False, "stop_reason": "completed", "notes": "仍需解析价格列。"}
+
+    group_like, val_col = _group_and_value_columns(cols)
+    if group_like and val_col and not any(h.get("tool") == "group_by_summary" for h in hist):
+        return {"should_finish": False, "stop_reason": "completed", "notes": "等待分组聚合。"}
+
     return {"should_finish": False, "stop_reason": "completed", "notes": "继续下一步。"}
 
 
@@ -291,9 +396,21 @@ def answer_node(state: AgentState, config: RunnableConfig) -> dict[str, Any]:
         history_excerpt=_history_excerpt(state.get("execution_history", [])),
     )
     model = get_chat_model()
-    resp = model.invoke([SystemMessage(content=SYSTEM_ZH), HumanMessage(content=prompt)])
-    text = getattr(resp, "content", str(resp))
-    return {"final_answer": str(text)}
+    try:
+        resp = model.invoke([SystemMessage(content=SYSTEM_ZH), HumanMessage(content=prompt)])
+        text = getattr(resp, "content", str(resp))
+        return {"final_answer": str(text)}
+    except Exception as e:  # noqa: BLE001
+        logger.warning("answer LLM failed, fallback to summary: %s", e)
+        prof = state.get("data_profile", {}) or {}
+        n = prof.get("n_rows", "未知")
+        lines = [
+            "## 分析结论（模型不可用时的摘要）",
+            f"- 数据行数：**{n}**",
+            f"- 停止原因：**{state.get('stop_reason', '') or 'completed'}**",
+            "- 已执行工具见 `execution_history`；若需完整结论请检查 API Key 与网络后重试。",
+        ]
+        return {"final_answer": "\n".join(lines)}
 
 
 def route_after_explore(state: AgentState) -> Literal["plan", "answer"]:

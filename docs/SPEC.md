@@ -133,6 +133,7 @@
 | 清洗 | `filter_outliers` | IQR 或上下界 |
 | 清洗 | `fill_missing` | 均值/中位数/众数/常数 |
 | 清洗 | `parse_numeric_column` | 文本房价等 → float |
+| 清洗 | `parse_house_info_column` | 解析「房屋信息」管道串，生成 `hi_室`、`hi_厅`、`hi_建面` 等列 |
 | 分析 | `group_by_summary` | 分组聚合 |
 | 分析 | `filter_rows` | 结构化条件筛选（有限深度 AND/OR） |
 | 分析 | `correlation_analysis` | 两列相关系数 |
@@ -213,6 +214,8 @@ houseinsight-agent/
 ---
 
 ## 13. Success Criteria
+
+自动化验收见 [`tests/test_spec_success_criteria.py`](../tests/test_spec_success_criteria.py)（`pytest tests/test_spec_success_criteria.py`）。
 
 1. **自主性**：高层目标下完成 ≥1 清洗 + ≥1 聚合 + 结论。  
 2. **适应性**：脏数据下 `execution_history` 体现策略变化。  

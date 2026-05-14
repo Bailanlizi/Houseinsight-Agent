@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from typing import Any
 
@@ -7,12 +8,13 @@ import pandas as pd
 
 from server.tools.analyze_tools import (
     CorrelationArgs,
-    FilterRowsArgs,
     GroupBySummaryArgs,
+    SearchTextArgs,
     TopKValuesArgs,
     correlation_analysis,
     filter_rows,
     group_by_summary,
+    search_text,
     top_k_values,
 )
 from server.tools.clean_tools import (
@@ -26,9 +28,12 @@ from server.tools.clean_tools import (
     remove_duplicates,
 )
 from server.tools.explore_tools import GetBasicStatsArgs, GetDataProfileArgs, get_basic_stats, get_data_profile
+from server.tools.house_tools import ParseHouseInfoColumnArgs, parse_house_info_column
 from server.tools.search_tools import CompareCleaningResultsArgs, SearchListingsArgs, compare_cleaning_results, search_listings
 
 ToolFn = Callable[[pd.DataFrame, dict[str, Any]], tuple[pd.DataFrame, dict[str, Any]]]
+
+logger = logging.getLogger(__name__)
 
 
 class ToolSpec:
@@ -47,8 +52,13 @@ TOOL_REGISTRY: dict[str, ToolSpec] = {
         lambda df, a: parse_numeric_column(df, ParseNumericColumnArgs.model_validate(a)),
         mutates=True,
     ),
+    "parse_house_info_column": ToolSpec(
+        lambda df, a: parse_house_info_column(df, ParseHouseInfoColumnArgs.model_validate(a)),
+        mutates=True,
+    ),
     "group_by_summary": ToolSpec(lambda df, a: group_by_summary(df, GroupBySummaryArgs.model_validate(a)), mutates=False),
-    "filter_rows": ToolSpec(lambda df, a: filter_rows(df, FilterRowsArgs.model_validate(a)), mutates=False),
+    "filter_rows": ToolSpec(lambda df, a: filter_rows(df, a), mutates=False),
+    "search_text": ToolSpec(lambda df, a: search_text(df, SearchTextArgs.model_validate(a)), mutates=False),
     "correlation_analysis": ToolSpec(
         lambda df, a: correlation_analysis(df, CorrelationArgs.model_validate(a)),
         mutates=False,
@@ -66,5 +76,9 @@ def dispatch_tool(name: str, df: pd.DataFrame, arguments: dict[str, Any]) -> tup
     spec = TOOL_REGISTRY.get(name)
     if spec is None:
         return df, {"ok": False, "error": f"未知工具: {name}"}, False
-    new_df, payload = spec.fn(df, arguments)
+    try:
+        new_df, payload = spec.fn(df, arguments)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("工具 %s 执行异常: %s", name, e)
+        return df, {"ok": False, "tool": name, "error": str(e)}, False
     return new_df, payload, spec.mutates

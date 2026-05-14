@@ -5,7 +5,7 @@ from typing import Any
 import pandas as pd
 from pydantic import BaseModel, Field
 
-from server.tools.analyze_tools import FilterRowsArgs, filter_rows
+from server.tools.analyze_tools import FilterRowsArgs, coerce_filter_rows_arguments, filter_rows
 
 
 class SearchListingsArgs(BaseModel):
@@ -19,7 +19,7 @@ def search_listings(df: pd.DataFrame, args: SearchListingsArgs | dict[str, Any])
     if not isinstance(args, SearchListingsArgs):
         args = SearchListingsArgs.model_validate(args)
     try:
-        inner = FilterRowsArgs.model_validate(args.structured_filter)
+        inner = FilterRowsArgs.model_validate(coerce_filter_rows_arguments(args.structured_filter))
     except Exception as e:  # noqa: BLE001
         return df, {
             "ok": False,

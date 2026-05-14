@@ -1,5 +1,7 @@
 # HouseInsight Agent — 实现任务拆解（基于 SPEC v0.1）
 
+**SPEC §13 验收入口**：[`tests/test_spec_success_criteria.py`](../tests/test_spec_success_criteria.py)（`pytest tests/test_spec_success_criteria.py`）。
+
 垂直切片优先：每一任务交付可运行、可验证的一小条路径。
 
 ---
