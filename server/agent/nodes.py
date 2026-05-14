@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from typing import Any, Literal
 
@@ -132,6 +133,36 @@ def _parse_succeeded_for_column(hist: list[ExecutionRecord], col: str) -> bool:
         and (h.get("arguments") or {}).get("column") == col
         for h in hist
     )
+
+
+def _goal_implies_numeric_price_intent(goal: str) -> bool:
+    """用户是否在问总价/预算/多少万等需数值比较的问题（轻量关键词）。"""
+    g = (goal or "").strip()
+    if not g:
+        return False
+    if any(
+        k in g
+        for k in ("总价", "预算", "万元", "不超过", "不低于", "万以下", "万以上", "万内", "多少万")
+    ):
+        return True
+    return bool(re.search(r"\d+\s*万", g))
+
+
+def _must_continue_for_price_pipeline(state: AgentState) -> bool:
+    """总价列仍为文本且用户意图依赖数值比较时，observe 不应过早结束。"""
+    if not _goal_implies_numeric_price_intent(str(state.get("goal", ""))):
+        return False
+    cols, prof = _columns_and_profile(state)
+    price_like = _price_like_column(cols)
+    if not price_like:
+        return False
+    dtypes = prof.get("dtypes", {}) or {}
+    if dtypes.get(price_like) in ("float64", "int64", "Int64"):
+        return False
+    hist = state.get("execution_history") or []
+    if _parse_succeeded_for_column(hist, price_like):
+        return False
+    return True
 
 
 def _needs_price_parse(prof: dict[str, Any], hist: list[ExecutionRecord], cols: list[str]) -> bool:
@@ -353,9 +384,21 @@ def _mock_observe(state: AgentState) -> dict[str, Any]:
         return {"should_finish": True, "stop_reason": "error", "notes": "工具执行失败，结束循环。"}
 
     if any(h.get("tool") == "group_by_summary" and h.get("ok") for h in hist):
+        if _must_continue_for_price_pipeline(state):
+            return {
+                "should_finish": False,
+                "stop_reason": "completed",
+                "notes": "用户含价格数值条件，须先解析总价列再继续。",
+            }
         return {"should_finish": True, "stop_reason": "completed", "notes": "已完成分组聚合（mock）。"}
 
     if any(h.get("tool") == "top_k_values" and h.get("ok") for h in hist):
+        if _must_continue_for_price_pipeline(state):
+            return {
+                "should_finish": False,
+                "stop_reason": "completed",
+                "notes": "用户含价格数值条件，须先解析总价列再继续。",
+            }
         return {"should_finish": True, "stop_reason": "completed", "notes": "已完成高频值统计（mock）。"}
 
     # execute 每步会清空剩余 plan；空队列不代表任务结束，需看 _mock_plan 是否还有后续
@@ -363,6 +406,12 @@ def _mock_observe(state: AgentState) -> dict[str, Any]:
         if not hist:
             return {"should_finish": False, "stop_reason": "completed", "notes": "等待首轮计划。"}
         if last and last.get("ok") and not _mock_plan(state):
+            if _must_continue_for_price_pipeline(state):
+                return {
+                    "should_finish": False,
+                    "stop_reason": "completed",
+                    "notes": "用户含价格数值条件，须先解析总价列再继续。",
+                }
             return {"should_finish": True, "stop_reason": "completed", "notes": "无后续步骤（mock）。"}
         return {"should_finish": False, "stop_reason": "completed", "notes": "本轮计划已消费，继续规划。"}
 
@@ -408,6 +457,12 @@ def _llm_observe(state: AgentState) -> dict[str, Any]:
         out: ObserveLLMOutput = structured.invoke(
             [SystemMessage(content=SYSTEM_ZH), HumanMessage(content=prompt)]
         )
+        if out.should_finish and _must_continue_for_price_pipeline(state):
+            return {
+                "should_finish": False,
+                "stop_reason": "completed",
+                "notes": "用户含价格数值条件，总价列尚未解析为数值，应继续 parse_numeric_column 再筛选。",
+            }
         return {
             "should_finish": out.should_finish,
             "stop_reason": out.stop_reason,

@@ -43,6 +43,8 @@ export function useSessionRun() {
   const wsRef = useRef<WebSocket | null>(null)
   const lastQueryRef = useRef('')
   const wsRunKindRef = useRef<'clean' | 'chat'>('chat')
+  /** 每次发起对话 run 自增，用于忽略旧 WebSocket 上迟到的 final（防重复气泡） */
+  const chatQueryEpochRef = useRef(0)
   const mountedRef = useRef(true)
 
   const appendEvent = useCallback((e: WsEvent) => {
@@ -157,9 +159,12 @@ export function useSessionRun() {
   }, [cleaningDone])
 
   const attachWsHandlers = useCallback(
-    (ws: WebSocket) => {
+    (ws: WebSocket, chatEpoch?: number) => {
       ws.onmessage = (ev) => {
         try {
+          if (wsRunKindRef.current === 'chat' && chatEpoch != null && chatEpoch !== chatQueryEpochRef.current) {
+            return
+          }
           const msg = JSON.parse(ev.data as string) as WsEvent
           appendEvent(msg)
           const kind = wsRunKindRef.current
@@ -170,7 +175,13 @@ export function useSessionRun() {
             if (kind === 'clean') {
               setCleaningSummary(ans)
             } else {
-              setMessages((prev) => [...prev, { id: newId(), role: 'assistant', content: ans }])
+              setMessages((prev) => {
+                const last = prev[prev.length - 1]
+                if (last?.role === 'assistant' && last.content === ans) {
+                  return prev
+                }
+                return [...prev, { id: newId(), role: 'assistant', content: ans }]
+              })
             }
           }
           if (msg.event === 'done') {
@@ -216,7 +227,9 @@ export function useSessionRun() {
       }
 
       ws.onclose = () => {
-        wsRef.current = null
+        if (wsRef.current === ws) {
+          wsRef.current = null
+        }
       }
     },
     [appendEvent],
@@ -282,6 +295,8 @@ export function useSessionRun() {
       setGoal(trimmed)
       lastQueryRef.current = trimmed
       wsRunKindRef.current = 'chat'
+      chatQueryEpochRef.current += 1
+      const chatEpoch = chatQueryEpochRef.current
       setMessages((prev) => [...prev, { id: newId(), role: 'user', content: trimmed }])
       setPhase('running')
       setStatus('连接 WebSocket…')
@@ -294,7 +309,7 @@ export function useSessionRun() {
         ws.send(JSON.stringify({ cmd: 'run', goal: trimmed, max_iterations: maxIter }))
       }
 
-      attachWsHandlers(ws)
+      attachWsHandlers(ws, chatEpoch)
     },
     [sessionId, uploadReady, cleaningDone, maxIter, attachWsHandlers],
   )
