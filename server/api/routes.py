@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import io
 import uuid
+import asyncio
+
+from typing import Any
 
 import pandas as pd
 from fastapi import APIRouter, File, HTTPException, UploadFile
@@ -35,6 +38,15 @@ def _sanitize_state_for_api(state: dict) -> dict:
     return out
 
 
+def persist_session_state(session_id: str, out: dict[str, Any]) -> None:
+    """将一次 run 的终态写入内存元数据（REST run 与 WS run 共用）。"""
+    if session_id not in _session_meta:
+        return
+    safe = _sanitize_state_for_api(out)
+    _session_meta[session_id]["last_state"] = safe
+    _session_meta[session_id]["final_answer"] = out.get("final_answer") or ""
+
+
 class RunBody(BaseModel):
     goal: str = Field(default="分析这个数据集")
     options: dict = Field(default_factory=dict)
@@ -43,7 +55,11 @@ class RunBody(BaseModel):
 @router.post("/sessions")
 async def create_session() -> dict:
     sid = str(uuid.uuid4())
-    _session_meta[sid] = {"final_answer": None, "last_state": None}
+    _session_meta[sid] = {
+        "final_answer": None,
+        "last_state": None,
+        "run_lock": asyncio.Lock(),
+    }
     return {"session_id": sid}
 
 
@@ -90,10 +106,8 @@ async def run_session(session_id: str, body: RunBody) -> dict:
         "final_answer": "",
     }
     out = run_agent(initial)
-    safe = _sanitize_state_for_api(out)
-    _session_meta[session_id]["last_state"] = safe
     fa = out.get("final_answer") or ""
-    _session_meta[session_id]["final_answer"] = fa
+    persist_session_state(session_id, out)
     return {"session_id": session_id, "final_answer": fa, "stop_reason": out.get("stop_reason", "")}
 
 

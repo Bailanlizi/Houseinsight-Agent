@@ -60,13 +60,13 @@
 ### 3.1 MVP
 
 - LangGraph 闭环：`explore → plan → execute → observe` 循环，终止于 `answer`。  
-- FastAPI：**上传 CSV、启动一次分析、查询会话状态/日志**；WebSocket 提供 **事件 schema 握手**（§7.2），细粒度流式事件延后。  
+- FastAPI：**上传 CSV、启动一次分析、查询会话状态/日志**；WebSocket 提供 **LangGraph 对齐的实时事件流**（§7.2）；最小 React 前端见仓库 `web/`。  
 - 工具集：§6 所列契约；实现可分两批：**探索+清洗+基础分析** 先于 **反思+复杂 NL 查询**。  
 - DataFrame **不**完整序列化进 checkpoint；见 §4.2。
 
 ### 3.2 v0.2+
 
-- WebSocket 细粒度事件流、前端 React 对话 UI。  
+- WebSocket 与 `run` 的深度集成（取消/回放）、会话持久化、配额、鉴权。  
 - `search_listings` 的语义检索/embedding。  
 - 会话持久化、配额、鉴权。
 
@@ -159,26 +159,38 @@
 - `DELETE /sessions/{id}` — 删除会话元数据并释放 `SessionStore` 中对应 DataFrame  
 - `GET /health`
 
-### 7.2 WebSocket（MVP）
+### 7.2 WebSocket（实时事件流）
 
-连接：`WS /sessions/{session_id}/ws`（`server/api/ws.py`）。
+连接：`WS /sessions/{session_id}/ws`（[`server/api/ws.py`](../server/api/ws.py)）。与 REST `POST /sessions/{id}/run` **并存**：REST 仍为同步一次返回；WS 用于**长连接 + 流式事件**（[`run_agent_streaming`](../server/agent/graph.py) 基于 LangGraph `stream_mode=["updates","values"]`）。
 
-**当前行为**：握手后服务端依次推送两条 JSON：
+**握手**（连接后立即推送，无需客户端先发消息）：
 
-1. `{"event":"schema", "session_id": "...", "version": 1, "events": [...]}` — 约定未来增量事件的名称与载荷形状（与下表一致）。  
-2. `{"event":"idle", "session_id": "...", "hint": "..."}` — 提示当前分析仍以 REST `run` + `GET state` 为准。
+1. `{"event":"schema", "session_id": "...", "version": 1, "events": [...]}`  
+2. `{"event":"ready", "session_id": "..."}`
 
-随后服务端主动关闭连接（code 1000）。**未实现**：与 LangGraph 绑定的实时 `tool_call` / `final` 流（归入 v0.2+，见 §3.2）。
+**客户端命令**（JSON 文本帧）：
 
-| `event` 字段值 | 说明（载荷为 `payload` 内字段） |
-|----------------|----------------------------------|
-| `schema` | `version`、`events`：事件名列表 |
-| `node_enter` / `node_exit` | `node`: 节点名 |
+```json
+{"cmd":"run","goal":"分析这个数据集","max_iterations":15}
+```
+
+- 须已 `POST /sessions` 且 `POST .../upload` 成功；否则推送 `event:error`。  
+- 同一会话并发第二次 `run`：在已有任务未完成时返回 `event:error`（已有任务运行中）。  
+
+**运行期事件**（节选；均含 `session_id`，多数含 `ts`）：
+
+| `event` | 说明 |
+|---------|------|
+| `node_enter` / `node_exit` | `node`：explore / plan / execute / observe / answer；`node_exit` 可含缩略 `payload` |
 | `tool_call` | `tool`, `arguments` |
-| `tool_result` | `tool`, `ok`, `summary` |
+| `tool_result` | `tool`, `ok`, `summary`（截断）, `error` |
 | `final` | `final_answer`, `stop_reason` |
 | `error` | `message` |
-| `idle` | `hint`：人机可读说明 |
+| `done` | 本轮流结束标记 |
+
+会话终态仍写入与 REST `run` 相同的内存元数据（`persist_session_state`），`GET /sessions/{id}/state` 可复查。
+
+**前端**：见仓库 [`web/`](../web/)（Vite + React）；开发时 `npm run dev` 与 `uvicorn` 分端口，`vite.config.ts` 将 `/sessions` HTTP 与 WS 代理到后端。
 
 ### 7.3 CLI
 

@@ -27,7 +27,7 @@ from server.tools.clean_tools import (
     parse_numeric_column,
     remove_duplicates,
 )
-from server.tools.explore_tools import GetBasicStatsArgs, GetDataProfileArgs, get_basic_stats, get_data_profile
+from server.tools.explore_tools import get_basic_stats, get_data_profile
 from server.tools.house_tools import ParseHouseInfoColumnArgs, parse_house_info_column
 from server.tools.search_tools import CompareCleaningResultsArgs, SearchListingsArgs, compare_cleaning_results, search_listings
 

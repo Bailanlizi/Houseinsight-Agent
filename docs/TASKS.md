@@ -111,12 +111,12 @@
 
 **Acceptance criteria:**
 
-- [x] 文档说明事件 schema；无完整流式实现则标记 MVP — **已实现**：握手推送 `schema` + `idle` 后关闭；契约见 **SPEC §7.2** 与 `server/api/ws.py` 中 `WS_EVENT_SCHEMA`
-- [ ] 与 `run` 绑定的实时 `tool_call` / `final` 流（**DEFERRED** → v0.2+ / SPEC §3.2）
+- [x] 文档说明事件 schema；无完整流式实现则标记 MVP — **已实现**：`cmd:run` + LangGraph stream 事件；契约见 **SPEC §7.2** 与 `server/api/ws.py`
+- [ ] 与 `run` 绑定的取消/回放、鉴权（**DEFERRED**）
 
 **Verification:**
 
-- [x] `pytest tests/test_ws_schema.py`
+- [x] `pytest tests/test_ws_schema.py` `tests/test_ws_run_events.py`
 
 **Dependencies:** Task 5
 
