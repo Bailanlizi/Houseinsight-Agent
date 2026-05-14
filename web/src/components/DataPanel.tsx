@@ -60,22 +60,15 @@ export function DataPanel({
     if (window.confirm('确定清空当前对话？已上传的 CSV 将保留。')) onNewChat()
   }, [onNewChat])
 
+  const filePickDisabled = !sessionId || isBusy
+
   return (
     <section className="data-panel" aria-labelledby="data-panel-title">
-      <h2 id="data-panel-title" className="data-panel__title">
-        数据管理
-      </h2>
-
-      <div className="data-panel__actions">
-        <button
-          type="button"
-          className="btn btn-primary"
-          onClick={runCleaning}
-          disabled={!uploadReady || isBusy || cleaningDone}
-        >
-          运行清洗
-        </button>
-        <button type="button" className="btn btn-ghost" onClick={confirmNewChat} disabled={isBusy || !sessionId}>
+      <div className="data-panel__head">
+        <h2 id="data-panel-title" className="data-panel__title">
+          数据管理
+        </h2>
+        <button type="button" className="btn btn-ghost data-panel__new-chat" onClick={confirmNewChat} disabled={isBusy || !sessionId}>
           新建对话
         </button>
       </div>
@@ -92,8 +85,8 @@ export function DataPanel({
         type="file"
         accept=".csv,text/csv"
         className="data-panel__file-hidden"
-        disabled={!sessionId || isBusy}
-        aria-describedby="data-session-label csv-hint"
+        disabled={filePickDisabled}
+        aria-describedby={sessionId ? 'data-session-label csv-hint' : 'csv-hint'}
         onChange={(e) => void uploadFile(e.target.files?.[0] ?? null)}
       />
 
@@ -116,9 +109,24 @@ export function DataPanel({
         <span className="data-panel__drop-sub">或点击下方按钮选择文件</span>
       </div>
 
-      <label htmlFor="csv-upload" className="btn btn-primary data-panel__browse">
-        选择 CSV 文件
-      </label>
+      <div className="data-panel__upload-row">
+        <label
+          htmlFor="csv-upload"
+          className={`btn btn-primary data-panel__upload-btn${filePickDisabled ? ' data-panel__upload-btn--off' : ''}`}
+          aria-disabled={filePickDisabled}
+        >
+          选择 CSV 文件
+        </label>
+        <button
+          type="button"
+          className="btn btn-primary data-panel__upload-btn"
+          onClick={runCleaning}
+          disabled={!uploadReady || isBusy || cleaningDone}
+        >
+          运行清洗
+        </button>
+      </div>
+
       <p id="csv-hint" className="data-panel__hint">
         打开页面时已自动创建会话；仅支持 CSV。上传后请先运行清洗，再在右侧提问。
       </p>

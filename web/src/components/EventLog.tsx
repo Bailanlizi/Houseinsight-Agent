@@ -16,7 +16,7 @@ function eventTone(ev: string): 'node' | 'tool' | 'done' | 'error' | 'default' {
 }
 
 export function EventLog({ events, phase }: Props) {
-  const [open, setOpen] = useState(true)
+  const [open, setOpen] = useState(false)
   const headId = useId()
   const bodyId = useId()
   const live = phase === 'running'
@@ -25,7 +25,7 @@ export function EventLog({ events, phase }: Props) {
     <section className="event-log-panel" aria-labelledby={headId}>
       <div className="event-log-panel__head">
         <h2 id={headId} className="event-log-panel__title">
-          WebSocket 实时日志
+          事件日志
         </h2>
         {live && (
           <span className="event-log-panel__live">
@@ -41,6 +41,7 @@ export function EventLog({ events, phase }: Props) {
           aria-controls={bodyId}
           aria-label={open ? '折叠日志' : '展开日志'}
         >
+          <span className="event-log-panel__toggle-label">{open ? '收起' : '展开'}</span>
           <span className="event-log-panel__chevron" aria-hidden>
             {open ? '▼' : '▶'}
           </span>
