@@ -146,12 +146,60 @@ def _needs_price_parse(prof: dict[str, Any], hist: list[ExecutionRecord], cols: 
     return not _parse_succeeded_for_column(hist, price_like)
 
 
+def _text_columns_for_search(cols: list[str]) -> list[str]:
+    return [c for c in ("描述", "位置信息", "房屋信息") if c in cols]
+
+
+def _terms_from_goal(goal: str) -> list[str]:
+    """从用户目标抽取可能出现在房源文案中的短词（通用子串检索，非业务硬编码工具）。"""
+    g = goal or ""
+    bucket: list[str] = []
+    if any(k in g for k in ("地铁", "近地铁", "轨道", "号线", "交通", "站点")):
+        bucket.extend(["地铁", "轨道", "号线"])
+    if any(k in g for k in ("阳台", "露台")):
+        bucket.extend(["阳台", "露台"])
+    if any(k in g for k in ("采光", "通透", "明厨", "明卫")):
+        bucket.extend(["采光", "明厨", "明卫"])
+    if any(k in g for k in ("学区", "学位", "学校", "名校")):
+        bucket.extend(["学区", "学位", "学校"])
+    if any(k in g for k in ("电梯", "梯户")):
+        bucket.extend(["电梯", "梯户"])
+    return list(dict.fromkeys(bucket))
+
+
+def _mock_plan_soft_search(state: AgentState) -> PlanStepDict | None:
+    cols, _ = _columns_and_profile(state)
+    text_cols = _text_columns_for_search(cols)
+    if not text_cols:
+        return None
+    hist = state.get("execution_history", [])
+    if any(h.get("tool") == "search_text" for h in hist):
+        return None
+    terms = _terms_from_goal(str(state.get("goal", "") or ""))
+    if not terms:
+        return None
+    return {
+        "tool": "search_text",
+        "arguments": {
+            "columns": text_cols,
+            "terms": terms,
+            "how": "any_term_any_column",
+            "case_insensitive": True,
+        },
+        "rationale": "用户目标含非结构化卖点，多列多词 OR 检索",
+    }
+
+
 def _mock_plan(state: AgentState) -> list[PlanStepDict]:
     hist = state.get("execution_history", [])
     cols, prof = _columns_and_profile(state)
 
     if not any(h.get("tool") == "get_basic_stats" for h in hist):
         return [{"tool": "get_basic_stats", "arguments": {}, "rationale": "先了解数值列分布"}]
+
+    soft = _mock_plan_soft_search(state)
+    if soft is not None:
+        return [soft]
 
     hi = _house_info_column(cols)
     if hi and not _parse_house_done(hist, hi):
@@ -191,7 +239,7 @@ def _mock_plan(state: AgentState) -> list[PlanStepDict]:
     return []
 
 
-def _llm_plan(state: AgentState) -> list[PlanStepDict]:
+def _llm_plan(state: AgentState) -> tuple[list[PlanStepDict], str | None]:
     tool_names = "\n".join(f"- {k}" for k in sorted(TOOL_REGISTRY))
     prompt = (
         PLAN_PROMPT.format(
@@ -211,21 +259,23 @@ def _llm_plan(state: AgentState) -> list[PlanStepDict]:
                 HumanMessage(content=prompt),
             ]
         )
-        return [s.model_dump(exclude_none=True) for s in out.steps][:3]
+        return [s.model_dump(exclude_none=True) for s in out.steps][:3], None
     except Exception as e:  # noqa: BLE001
-        logger.warning("LLM plan failed, fallback mock: %s", e)
-        return _mock_plan(state)
+        logger.warning("LLM plan failed: %s", e)
+        return [], f"计划生成失败（结构化输出不可用）: {e}"
 
 
 def plan_node(state: AgentState, config: RunnableConfig) -> dict[str, Any]:
     del config
     if state.get("stop_reason") == "error" and not state.get("data_profile"):
-        return {"plan": []}
+        return {"plan": [], "plan_generation_error": None}
     if _use_mock_llm():
         steps = _mock_plan(state)
-    else:
-        steps = _llm_plan(state)
-    return {"plan": steps}
+        return {"plan": steps, "plan_generation_error": None}
+    steps, err = _llm_plan(state)
+    if err:
+        return {"plan": [], "plan_generation_error": err}
+    return {"plan": steps, "plan_generation_error": None}
 
 
 def execute_node(state: AgentState, config: RunnableConfig) -> dict[str, Any]:
@@ -246,12 +296,13 @@ def execute_node(state: AgentState, config: RunnableConfig) -> dict[str, Any]:
 
     plan = list(state.get("plan") or [])
     if not plan:
+        err = state.get("plan_generation_error") or "计划为空"
         rec = {
             "tool": "",
             "arguments": {},
             "ok": False,
             "summary": {},
-            "error": "计划为空",
+            "error": err,
             "duration_ms": 0.0,
         }
         return {"execution_history": [rec], "plan": []}
@@ -319,6 +370,9 @@ def _mock_observe(state: AgentState) -> dict[str, Any]:
     if last and last.get("tool") == "get_basic_stats" and last.get("ok"):
         return {"should_finish": False, "stop_reason": "completed", "notes": "基础统计完成，继续清洗/分析。"}
 
+    if last and last.get("tool") == "search_text" and last.get("ok"):
+        return {"should_finish": False, "stop_reason": "completed", "notes": "文本检索完成，继续解析/聚合。"}
+
     if last and last.get("tool") == "parse_house_info_column" and last.get("ok"):
         return {"should_finish": False, "stop_reason": "completed", "notes": "房屋信息解析完成，继续价格/筛选。"}
 
@@ -338,6 +392,12 @@ def _mock_observe(state: AgentState) -> dict[str, Any]:
 def _llm_observe(state: AgentState) -> dict[str, Any]:
     hist = state.get("execution_history", [])
     last = hist[-1] if hist else {}
+    if isinstance(last, dict) and last.get("ok") is False and last.get("error"):
+        return {
+            "should_finish": True,
+            "stop_reason": "error",
+            "notes": f"工具或计划失败：{last.get('error')}",
+        }
     prompt = OBSERVE_PROMPT.format(goal=state.get("goal", ""), last_result=json.dumps(last, ensure_ascii=False))
     model = get_chat_model()
     structured = model.with_structured_output(ObserveLLMOutput)
@@ -382,12 +442,19 @@ def answer_node(state: AgentState, config: RunnableConfig) -> dict[str, Any]:
     if _use_mock_llm():
         prof = state.get("data_profile", {})
         n = prof.get("n_rows", "未知")
+        sr = state.get("stop_reason", "") or "completed"
         lines = [
             "## 分析结论（mock 模式）",
             f"- 数据行数：**{n}**",
-            f"- 停止原因：**{state.get('stop_reason', '') or 'completed'}**",
+            f"- 停止原因：**{sr}**",
             "- 已执行工具摘要见会话状态 `execution_history`。",
         ]
+        if sr == "error":
+            err_hint = ""
+            hist = state.get("execution_history") or []
+            if hist and isinstance(hist[-1], dict) and hist[-1].get("error"):
+                err_hint = f"\n- 最近错误：**{hist[-1].get('error')}**"
+            lines.append(err_hint or "\n- 最近一步执行失败，请查看 `execution_history` 中的 error。")
         return {"final_answer": "\n".join(lines)}
 
     prompt = ANSWER_PROMPT.format(

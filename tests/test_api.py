@@ -36,3 +36,8 @@ def test_api_flow(monkeypatch):
     st = c.get(f"/sessions/{sid}/state")
     assert st.status_code == 200
     assert st.json().get("execution_history")
+
+    deleted = c.delete(f"/sessions/{sid}")
+    assert deleted.status_code == 200
+    assert deleted.json().get("deleted") is True
+    assert c.get(f"/sessions/{sid}/state").status_code == 404

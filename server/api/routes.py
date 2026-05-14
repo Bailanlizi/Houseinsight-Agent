@@ -97,6 +97,16 @@ async def run_session(session_id: str, body: RunBody) -> dict:
     return {"session_id": session_id, "final_answer": fa, "stop_reason": out.get("stop_reason", "")}
 
 
+@router.delete("/sessions/{session_id}")
+async def delete_session(session_id: str) -> dict:
+    """释放会话元数据与 SessionStore 中的 DataFrame（SPEC Task 2 可选能力）。"""
+    if session_id not in _session_meta:
+        raise HTTPException(status_code=404, detail="session not found")
+    _session_meta.pop(session_id, None)
+    get_session_store().delete(session_id)
+    return {"session_id": session_id, "deleted": True}
+
+
 @router.get("/sessions/{session_id}/state")
 async def session_state(session_id: str) -> dict:
     if session_id not in _session_meta:

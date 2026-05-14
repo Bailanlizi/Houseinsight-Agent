@@ -12,13 +12,13 @@
 
 **Acceptance criteria:**
 
-- [ ] `pip install -e ".[dev]"` 后 `pytest` 可发现 `tests/`
-- [ ] `Settings` 含 `base_url`, `api_key`, `model`, `max_iterations`, `log_llm_io`
+- [x] `pip install -e ".[dev]"` 后 `pytest` 可发现 `tests/`
+- [x] `Settings` 含 `base_url`, `api_key`, `model`, `max_iterations`, `log_llm_io`（字段名以 `openai_*` / 环境变量别名为准，见 `server/core/config.py`）
 
 **Verification:**
 
-- [ ] `pytest -q` 通过（含 smoke）
-- [ ] 无 key 时配置对象仍可实例化（用于 mock 模式）
+- [x] `pytest -q` 通过（含 smoke）
+- [x] 无 key 时配置对象仍可实例化（用于 mock 模式）
 
 **Dependencies:** None
 
@@ -32,12 +32,12 @@
 
 **Acceptance criteria:**
 
-- [ ] 上传 CSV 后可按 `session_id` 取回同一引用
-- [ ] 删除会话可释放内存（可选 v0.1）
+- [x] 上传 CSV 后可按 `session_id` 取回同一引用
+- [x] 删除会话可释放内存（可选 v0.1）— `SessionStore.delete` + `DELETE /sessions/{id}`（`server/api/routes.py`）
 
 **Verification:**
 
-- [ ] 单元测试：放入/取出/覆盖 DataFrame
+- [x] 单元测试：放入/取出/覆盖 DataFrame（`tests/test_session_store.py`）
 
 **Dependencies:** Task 1
 
@@ -51,12 +51,13 @@
 
 **Acceptance criteria:**
 
-- [ ] 列不存在时返回结构化错误，不抛裸异常到上层
-- [ ] `get_data_profile` / `get_basic_stats` / `filter_rows` / `parse_numeric_column`（含「万」）有单测
+- [x] 列不存在时返回结构化错误，不抛裸异常到上层
+- [x] `get_data_profile` / `get_basic_stats` / `filter_rows` / `parse_numeric_column`（含「万」）有单测
+- [x] 增量：`parse_house_info_column`、`search_text`（多列多关键词文本检索）、`house_tools` / `search_listings` 等有对应单测（`tests/tools/`）
 
 **Verification:**
 
-- [ ] `pytest tests/tools/`
+- [x] `pytest tests/tools/`
 
 **Dependencies:** Task 1
 
@@ -70,12 +71,13 @@
 
 **Acceptance criteria:**
 
-- [ ] 单次 `invoke` 在无外网 key 的 CI 下完成并写入 `final_answer`
-- [ ] `iteration` 与 `stop_reason` 符合上限语义
+- [x] 单次 `invoke` 在无外网 key 的 CI 下完成并写入 `final_answer`
+- [x] `iteration` 与 `stop_reason` 符合上限语义
+- [x] mock 规划在用户目标含交通/采光等软条件且存在 `描述` 等列时调用 `search_text`（`server/agent/nodes.py`）
 
 **Verification:**
 
-- [ ] `tests/test_graph_smoke.py`
+- [x] `tests/test_graph_smoke.py`（含 `search_text` 场景）
 
 **Dependencies:** Task 2, Task 3
 
@@ -89,12 +91,13 @@
 
 **Acceptance criteria:**
 
-- [ ] `httpx` 异步测试上传小 CSV 并 `run` 返回最终状态字段
-- [ ] 上传大小/行数限制（合理默认值）
+- [x] `httpx` 异步测试上传小 CSV 并 `run` 返回最终状态字段
+- [x] 上传大小/行数限制（合理默认值）
+- [x] `DELETE /sessions/{id}` 删除元数据并释放 `SessionStore`（见 SPEC §7.1）
 
 **Verification:**
 
-- [ ] `pytest tests/test_api.py`（可使用 `TestClient`）
+- [x] `pytest tests/test_api.py`（可使用 `TestClient`）
 
 **Dependencies:** Task 4
 
@@ -108,9 +111,12 @@
 
 **Acceptance criteria:**
 
-- [ ] 文档说明事件 schema；无实现则标记 DEFERRED
+- [x] 文档说明事件 schema；无完整流式实现则标记 MVP — **已实现**：握手推送 `schema` + `idle` 后关闭；契约见 **SPEC §7.2** 与 `server/api/ws.py` 中 `WS_EVENT_SCHEMA`
+- [ ] 与 `run` 绑定的实时 `tool_call` / `final` 流（**DEFERRED** → v0.2+ / SPEC §3.2）
 
-**Verification:** 手动或轻量 async 测试
+**Verification:**
+
+- [x] `pytest tests/test_ws_schema.py`
 
 **Dependencies:** Task 5
 
@@ -124,9 +130,9 @@
 
 **Acceptance criteria:**
 
-- [ ] 结构化解析失败时降级为安全错误信息并 `stop_reason=error`
+- [x] 结构化解析失败时降级为安全错误信息并 `stop_reason=error` — `plan` 失败写入 `plan_generation_error`，`execute` 记录错误，`observe` 对失败工具硬兜底结束（`tests/test_plan_generation_error.py`）
 
-**Verification:** 本地有 key 时手跑一条；CI 跳过
+**Verification:** 本地有 key 时手跑一条；CI 用 fake model 单测 `plan_node`
 
 **Dependencies:** Task 4
 
@@ -142,10 +148,15 @@
 
 **Files likely touched:** `server/cli.py`
 
+**Verification:** [x] 与 `run_agent` 共用图；README 中命令为准
+
 ---
 
 ## 建议实现顺序
 
-`1 → 2 → 3 → 4 → 5 → 7 → 8 → 6`
+`1 → 2 → 3 → 4 → 5 → 7 → 8 → 6（MVP 握手）`
 
-当前仓库初始提交已覆盖 **1–5、7（基础）、8** 的骨架与可测子集；Task 6 可在后续迭代补全。
+## 后续增量（未在 v0.1 必收范围内）
+
+- `filter_rows` 与 `search_text` 分步结果的 **表级交集**（需物化子集或组合工具，避免仅靠 answer 模型对齐预览）。
+- WebSocket 与 LangGraph 回调的全链路事件推送。

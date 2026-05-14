@@ -29,6 +29,7 @@ class AgentState(TypedDict, total=False):
     max_iterations: int
     data_profile: dict[str, Any]
     plan: list[PlanStepDict]
+    plan_generation_error: str | None  # 非 mock 下 LLM 计划结构化失败时写入，供 execute/observe 终止
     execution_history: Annotated[list[ExecutionRecord], operator.add]
     iteration: int
     stop_reason: Literal["completed", "max_iterations", "error", "user_abort", ""]
