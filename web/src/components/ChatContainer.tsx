@@ -5,12 +5,16 @@ import type { ChatMessage, Phase } from '../hooks/useSessionRun'
 import { ChatInput } from './ChatInput'
 import { ChatMessageRow } from './ChatMessageRow'
 import { EmptyState } from './EmptyState'
+import { SessionStatusBar } from './SessionStatusBar'
 
 type Props = {
   messages: ChatMessage[]
   phase: Phase
   uploadReady: boolean
   cleaningDone: boolean
+  status: string
+  /** 窄屏时在对话区顶部显示状态条 */
+  showSessionStatusBar?: boolean
   isBusy: boolean
   draft: string
   onDraftChange: (v: string) => void
@@ -25,6 +29,8 @@ export function ChatContainer({
   phase,
   uploadReady,
   cleaningDone,
+  status,
+  showSessionStatusBar,
   isBusy,
   draft,
   onDraftChange,
@@ -49,6 +55,14 @@ export function ChatContainer({
 
   return (
     <section className="chat-container" aria-label="对话">
+      {showSessionStatusBar ? (
+        <SessionStatusBar
+          phase={phase}
+          uploadReady={uploadReady}
+          cleaningDone={cleaningDone}
+          status={status}
+        />
+      ) : null}
       <div className="chat-container__scroll" role="log" aria-live="polite" aria-relevant="additions">
         {empty ? (
           <EmptyState

@@ -99,15 +99,105 @@
   background: var(--bg-secondary);
 }
 
-.hi-app > .hi-header,
-.hi-app > .error-banner,
-.hi-app > .hi-tabs {
+.hi-app > .hi-header {
   flex-shrink: 0;
 }
 
-.hi-app > .hi-layout {
+.hi-shell {
   flex: 1 1 auto;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 0 var(--hi-page-gutter-x);
+  box-sizing: border-box;
+}
+
+.hi-shell > .error-banner {
+  width: 100%;
+  max-width: none;
+  margin-left: 0;
+  margin-right: 0;
+}
+
+.hi-shell > .hi-layout {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* 三步进度 */
+.hi-workflow {
+  flex-shrink: 0;
+  margin-top: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  box-shadow: var(--shadow-sm);
+}
+
+.hi-workflow__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  justify-content: center;
+  gap: var(--sp-2);
+}
+
+.hi-workflow__step {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-btn);
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.hi-workflow__idx {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 50%;
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+  font-size: 0.7rem;
+}
+
+.hi-workflow__step--done {
+  border-color: var(--primary-border);
+  color: var(--text-primary);
+}
+
+.hi-workflow__step--done .hi-workflow__idx {
+  background: color-mix(in srgb, var(--primary) 22%, var(--bg-card));
+  color: var(--primary);
+}
+
+.hi-workflow__step--current {
+  border-width: 2px;
+  border-color: var(--primary);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-sm);
+}
+
+.hi-workflow__step--current .hi-workflow__idx {
+  background: var(--primary);
+  color: #fff;
+}
+
+.hi-shell > .hi-tabs {
+  flex-shrink: 0;
 }
 
 /* Header */
@@ -156,9 +246,9 @@
 /* Error */
 .error-banner {
   box-sizing: border-box;
-  width: calc(100% - 2 * var(--hi-page-gutter-x));
+  width: 100%;
   max-width: none;
-  margin: var(--sp-3) var(--hi-page-gutter-x) 0;
+  margin: var(--sp-3) 0 0;
   padding: var(--sp-3) var(--sp-4);
   display: flex;
   flex-wrap: wrap;
@@ -240,9 +330,9 @@
 .hi-tabs {
   display: none;
   box-sizing: border-box;
-  width: calc(100% - 2 * var(--hi-page-gutter-x));
+  width: 100%;
   max-width: none;
-  margin: var(--sp-3) var(--hi-page-gutter-x) 0;
+  margin: var(--sp-3) 0 0;
   padding: 0;
   gap: var(--sp-2);
 }
@@ -264,15 +354,15 @@
   background: color-mix(in srgb, var(--primary) 12%, var(--bg-card));
 }
 
-/* Layout — 50:50 等分；主区占满剩余视口，长对话仅在右侧框内滚动 */
+/* Layout — 左窄右宽；主区占满剩余视口 */
 .hi-layout {
   box-sizing: border-box;
-  width: calc(100% - 2 * var(--hi-page-gutter-x));
+  width: 100%;
   max-width: none;
-  margin: 0 var(--hi-page-gutter-x);
+  margin: 0;
   padding: var(--sp-5) 0;
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(280px, 0.42fr) minmax(0, 1fr);
   grid-template-rows: 1fr;
   gap: 24px;
   align-items: stretch;
@@ -306,8 +396,7 @@
   gap: var(--sp-3);
   min-height: 0;
   height: 100%;
-  overflow-x: hidden;
-  overflow-y: auto;
+  overflow: hidden;
 }
 
 .hi-col--chat {
@@ -317,6 +406,108 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+/* 左栏：数据 + 日志子 Tab */
+.prep-panel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+
+.prep-panel__tabs {
+  flex-shrink: 0;
+  display: flex;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+}
+
+.prep-panel__tab {
+  flex: 1;
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-btn);
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  font: inherit;
+  font-weight: 600;
+  font-size: 0.85rem;
+  cursor: pointer;
+  color: var(--text-secondary);
+}
+
+.prep-panel__tab.is-active {
+  border-color: var(--primary-border);
+  color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 12%, var(--bg-card));
+}
+
+.prep-panel__scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--sp-2);
+  display: flex;
+  flex-direction: column;
+}
+
+/* 窄屏对话顶栏 */
+.session-status-bar {
+  flex-shrink: 0;
+  padding: var(--sp-2) var(--sp-4);
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border);
+}
+
+.session-status-bar__main {
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.session-status-bar__detail {
+  margin: var(--sp-1) 0 0;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+/* 数据 Tab 底提示：可去对话 */
+.hi-chat-hint-snack {
+  position: fixed;
+  z-index: 40;
+  left: 50%;
+  bottom: max(16px, env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
+  width: calc(100% - 2 * var(--hi-page-gutter-x));
+  max-width: 28rem;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  box-shadow: var(--shadow-lg);
+}
+
+.hi-chat-hint-snack__text {
+  font-size: 0.85rem;
+  color: var(--text-primary);
+}
+
+.hi-chat-hint-snack__btn {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 /* Data panel */
@@ -538,6 +729,19 @@
   overflow: hidden;
 }
 
+.event-log-panel--fill {
+  flex: 1;
+  min-height: 0;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+}
+
+.event-log-panel--fill .event-log-panel__scroll {
+  max-height: none;
+}
+
 .event-log-panel__head {
   display: flex;
   align-items: center;
@@ -577,6 +781,13 @@
   flex: 0 1 auto;
   font-size: 0.95rem;
   font-weight: 700;
+}
+
+.event-log-panel__hint-muted {
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  margin-left: var(--sp-1);
 }
 
 .event-log-panel__live {
@@ -619,7 +830,7 @@
 .event-log-panel__scroll {
   flex: 1;
   min-height: 0;
-  max-height: min(32vh, 220px);
+  max-height: min(40vh, 320px);
   overflow: auto;
   padding: var(--sp-2) var(--sp-3);
 }

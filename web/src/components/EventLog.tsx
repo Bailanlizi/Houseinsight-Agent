@@ -5,6 +5,8 @@ import type { Phase, WsEvent } from '../hooks/useSessionRun'
 type Props = {
   events: WsEvent[]
   phase: Phase
+  /** 嵌入「日志」Tab 时占满剩余高度，展开区可滚动 */
+  fillHeight?: boolean
 }
 
 function eventTone(ev: string): 'node' | 'tool' | 'done' | 'error' | 'default' {
@@ -15,18 +17,21 @@ function eventTone(ev: string): 'node' | 'tool' | 'done' | 'error' | 'default' {
   return 'default'
 }
 
-export function EventLog({ events, phase }: Props) {
-  const [open, setOpen] = useState(false)
+export function EventLog({ events, phase, fillHeight = false }: Props) {
+  const [open, setOpen] = useState(fillHeight)
   const headId = useId()
   const bodyId = useId()
   const live = phase === 'running'
 
+  const sectionClass = `event-log-panel${fillHeight ? ' event-log-panel--fill' : ''}`
+
   return (
-    <section className="event-log-panel" aria-labelledby={headId}>
+    <section className={sectionClass} aria-labelledby={headId}>
       <div className="event-log-panel__head">
         <h2 id={headId} className="event-log-panel__title">
           事件日志
         </h2>
+        {!fillHeight && <span className="event-log-panel__hint-muted">（可选）</span>}
         {live && (
           <span className="event-log-panel__live">
             <span className="event-log-panel__live-dot" aria-hidden />

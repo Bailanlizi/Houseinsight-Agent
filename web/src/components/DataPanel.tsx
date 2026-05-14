@@ -128,7 +128,7 @@ export function DataPanel({
       </div>
 
       <p id="csv-hint" className="data-panel__hint">
-        打开页面时已自动创建会话；仅支持 CSV。上传后请先运行清洗，再在右侧提问。
+        打开页面时已自动创建会话；仅支持 CSV。上传后请先运行清洗，再在「对话」区提问（窄屏请先切换顶部「对话」Tab）。
       </p>
 
       {uploadMeta && (
