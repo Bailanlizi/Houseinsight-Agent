@@ -1,23 +1,23 @@
-/* HouseInsight — design tokens (light + dark) */
+/* HouseInsight — 柔和色系（亮/暗） */
 :root {
-  --primary: #7c3aed;
-  --primary-light: #8b5cf6;
-  --primary-dark: #6d28d9;
-  --success: #10b981;
-  --warning: #f59e0b;
-  --error: #ef4444;
-  --info: #3b82f6;
-  --bg-primary: #ffffff;
-  --bg-secondary: #f9fafb;
-  --bg-tertiary: #f3f4f6;
-  --bg-code: #f4f3ec;
-  --text-primary: #111827;
-  --text-secondary: #6b7280;
-  --text-muted: #9ca3af;
-  --border: #e5e7eb;
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
-  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+  --primary: #9b8fd9;
+  --primary-light: #b8aedf;
+  --primary-dark: #7d71b8;
+  --success: #6eb89a;
+  --warning: #e5b567;
+  --error: #e89890;
+  --info: #7eb8d4;
+  --bg-primary: #fdfcfa;
+  --bg-secondary: #f5f3f0;
+  --bg-tertiary: #ebe8e3;
+  --bg-code: #f0ede6;
+  --text-primary: #3f3d3a;
+  --text-secondary: #6d6a66;
+  --text-muted: #9c9890;
+  --border: #e4e0d8;
+  --shadow-sm: 0 1px 3px rgba(55, 48, 40, 0.06);
+  --shadow-md: 0 6px 20px rgba(55, 48, 40, 0.07);
+  --shadow-lg: 0 14px 36px rgba(55, 48, 40, 0.09);
   --r-btn: 8px;
   --r-card: 12px;
   --r-bubble: 16px;
@@ -35,17 +35,24 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg-primary: #111827;
-    --bg-secondary: #1f2937;
-    --bg-tertiary: #374151;
-    --bg-code: #1a1d24;
-    --text-primary: #f9fafb;
-    --text-secondary: #9ca3af;
-    --text-muted: #6b7280;
-    --border: #374151;
-    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
-    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.35);
-    --shadow-lg: 0 12px 28px rgba(0, 0, 0, 0.45);
+    --primary: #a99fd4;
+    --primary-light: #c4bddf;
+    --primary-dark: #8a7fc0;
+    --success: #7fc4a5;
+    --warning: #d4a574;
+    --error: #d4a09a;
+    --info: #8fc0d9;
+    --bg-primary: #1e1d22;
+    --bg-secondary: #26252c;
+    --bg-tertiary: #323038;
+    --bg-code: #2a282f;
+    --text-primary: #f0eeeb;
+    --text-secondary: #b8b4ad;
+    --text-muted: #8a857c;
+    --border: #3d3a44;
+    --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.25);
+    --shadow-md: 0 6px 20px rgba(0, 0, 0, 0.3);
+    --shadow-lg: 0 14px 36px rgba(0, 0, 0, 0.38);
   }
 }
 
@@ -90,13 +97,16 @@
   gap: var(--sp-4);
 }
 
-.hi-header__logo {
-  width: 48px;
-  height: 48px;
-  border-radius: var(--r-btn);
-  background: linear-gradient(135deg, var(--primary) 0%, var(--primary-light) 100%);
+.hi-header__mark {
   flex-shrink: 0;
-  box-shadow: var(--shadow-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  filter: drop-shadow(0 2px 8px rgba(90, 80, 120, 0.15));
+}
+
+.hi-header__mark svg {
+  display: block;
 }
 
 .hi-header__title {
@@ -381,8 +391,30 @@
   margin-bottom: 0;
 }
 
-.data-panel__skeleton {
-  margin-top: var(--sp-2);
+.data-panel__clean-out {
+  margin-top: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-btn);
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  font-size: 0.85rem;
+}
+
+.data-panel__clean-out summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--primary-dark);
+}
+
+.data-panel__clean-pre {
+  margin: var(--sp-2) 0 0;
+  max-height: 10rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  line-height: 1.45;
+  color: var(--text-secondary);
 }
 
 .sk-line {

@@ -39,6 +39,10 @@ export default function App() {
   const lastUserForRetry =
     [...run.messages].reverse().find((m) => m.role === 'user')?.content ?? ''
 
+  const canRetry =
+    !!run.error &&
+    (!run.sessionId || (!run.cleaningDone && run.uploadReady) || !!lastUserForRetry)
+
   return (
     <div className="hi-app">
       <Header />
@@ -46,8 +50,25 @@ export default function App() {
       <ErrorBanner
         message={run.error}
         onDismiss={run.clearError}
-        onRetry={lastUserForRetry ? () => run.retryLastQuery() : undefined}
-        retryLabel="重试上次问题"
+        onRetry={
+          canRetry
+            ? () => {
+                run.clearError()
+                if (!run.sessionId) void run.fetchNewSession()
+                else if (!run.cleaningDone && run.uploadReady) run.runCleaning()
+                else if (lastUserForRetry) run.retryLastQuery()
+              }
+            : undefined
+        }
+        retryLabel={
+          !run.sessionId
+            ? '重试创建会话'
+            : !run.cleaningDone && run.uploadReady
+              ? '重试清洗'
+              : lastUserForRetry
+                ? '重试上次问题'
+                : '重试'
+        }
       />
 
       {narrow && (
@@ -82,8 +103,11 @@ export default function App() {
               isBusy={run.isFormBusy}
               status={run.status}
               uploadMeta={run.uploadMeta}
-              createSession={run.createSession}
+              uploadReady={run.uploadReady}
+              cleaningDone={run.cleaningDone}
+              cleaningSummary={run.cleaningSummary}
               uploadFile={run.uploadFile}
+              runCleaning={run.runCleaning}
               onNewChat={run.clearConversation}
             />
             <EventLog events={run.events} phase={run.phase} />
@@ -96,6 +120,7 @@ export default function App() {
               messages={run.messages}
               phase={run.phase}
               uploadReady={run.uploadReady}
+              cleaningDone={run.cleaningDone}
               isBusy={run.isFormBusy}
               draft={draft}
               onDraftChange={setDraft}

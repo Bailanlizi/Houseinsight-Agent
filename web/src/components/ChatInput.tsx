@@ -5,6 +5,7 @@ type Props = {
   disabled: boolean
   busy: boolean
   uploadReady: boolean
+  cleaningDone: boolean
   onSend: (text: string) => void
   value: string
   onChange: (v: string) => void
@@ -16,6 +17,7 @@ export function ChatInput({
   disabled,
   busy,
   uploadReady,
+  cleaningDone,
   onSend,
   value,
   onChange,
@@ -71,7 +73,13 @@ export function ChatInput({
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={onKeyDown}
           disabled={disabled || busy}
-          placeholder={uploadReady ? '输入您的分析问题…' : '请先上传房源 CSV 后再提问'}
+          placeholder={
+            !uploadReady
+              ? '请先上传房源 CSV'
+              : !cleaningDone
+                ? '请先完成左侧「运行清洗」后再提问'
+                : '输入您的分析问题…'
+          }
           aria-describedby={hintId}
         />
         <button

@@ -9,8 +9,11 @@ type Props = {
   isBusy: boolean
   status: string
   uploadMeta: UploadMeta
-  createSession: () => Promise<void>
+  uploadReady: boolean
+  cleaningDone: boolean
+  cleaningSummary: string
   uploadFile: (file: File | null) => Promise<void>
+  runCleaning: () => void
   onNewChat: () => void
 }
 
@@ -26,8 +29,11 @@ export function DataPanel({
   isBusy,
   status,
   uploadMeta,
-  createSession,
+  uploadReady,
+  cleaningDone,
+  cleaningSummary,
   uploadFile,
+  runCleaning,
   onNewChat,
 }: Props) {
   const fileRef = useRef<HTMLInputElement>(null)
@@ -61,8 +67,13 @@ export function DataPanel({
       </h2>
 
       <div className="data-panel__actions">
-        <button type="button" className="btn btn-secondary" onClick={() => void createSession()} disabled={isBusy}>
-          创建后端会话
+        <button
+          type="button"
+          className="btn btn-primary"
+          onClick={runCleaning}
+          disabled={!uploadReady || isBusy || cleaningDone}
+        >
+          运行清洗
         </button>
         <button type="button" className="btn btn-ghost" onClick={confirmNewChat} disabled={isBusy || !sessionId}>
           新建对话
@@ -109,7 +120,7 @@ export function DataPanel({
         选择 CSV 文件
       </label>
       <p id="csv-hint" className="data-panel__hint">
-        需先创建会话；仅支持 CSV。
+        打开页面时已自动创建会话；仅支持 CSV。上传后请先运行清洗，再在右侧提问。
       </p>
 
       {uploadMeta && (
@@ -119,6 +130,13 @@ export function DataPanel({
           </p>
           <p className="data-panel__meta-line">数据概览：约 {uploadMeta.rows} 条房源记录</p>
         </div>
+      )}
+
+      {cleaningDone && cleaningSummary && (
+        <details className="data-panel__clean-out">
+          <summary>清洗结果摘要（可展开）</summary>
+          <pre className="data-panel__clean-pre">{cleaningSummary}</pre>
+        </details>
       )}
 
       {(phase === 'creating' || phase === 'uploading') && (

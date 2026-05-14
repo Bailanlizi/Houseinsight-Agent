@@ -10,6 +10,7 @@ type Props = {
   messages: ChatMessage[]
   phase: Phase
   uploadReady: boolean
+  cleaningDone: boolean
   isBusy: boolean
   draft: string
   onDraftChange: (v: string) => void
@@ -23,6 +24,7 @@ export function ChatContainer({
   messages,
   phase,
   uploadReady,
+  cleaningDone,
   isBusy,
   draft,
   onDraftChange,
@@ -32,20 +34,29 @@ export function ChatContainer({
   onExample,
 }: Props) {
   const bottomRef = useRef<HTMLDivElement>(null)
-  const showTyping = phase === 'running' && messages.length > 0 && messages[messages.length - 1]?.role === 'user'
+  const showTyping =
+    phase === 'running' &&
+    cleaningDone &&
+    messages.length > 0 &&
+    messages[messages.length - 1]?.role === 'user'
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages.length, phase, showTyping])
 
   const empty = messages.length === 0
-  const canChat = uploadReady && !isBusy
+  const canChat = uploadReady && cleaningDone && !isBusy
 
   return (
     <section className="chat-container" aria-label="对话">
       <div className="chat-container__scroll" role="log" aria-live="polite" aria-relevant="additions">
         {empty ? (
-          <EmptyState onExample={onExample} disabled={!uploadReady || isBusy} />
+          <EmptyState
+            onExample={onExample}
+            disabled={!canChat}
+            uploadReady={uploadReady}
+            cleaningDone={cleaningDone}
+          />
         ) : (
           <ul className="chat-container__list">
             {messages.map((m) => (
@@ -66,8 +77,9 @@ export function ChatContainer({
       </div>
       <ChatInput
         disabled={!canChat}
-        busy={phase === 'running'}
+        busy={phase === 'running' && cleaningDone}
         uploadReady={uploadReady}
+        cleaningDone={cleaningDone}
         value={draft}
         onChange={onDraftChange}
         maxIter={maxIter}
