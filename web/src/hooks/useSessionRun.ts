@@ -4,19 +4,38 @@ import { apiFetch, wsUrl } from '../lib/api'
 
 export type WsEvent = Record<string, unknown>
 
-type Phase = 'idle' | 'creating' | 'uploading' | 'running' | 'complete'
+export type Phase = 'idle' | 'creating' | 'uploading' | 'running' | 'complete'
+
+export type ChatMessage = {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+}
+
+export type UploadMeta = {
+  fileName: string
+  fileSize: number
+  rows: number
+} | null
+
+function newId(): string {
+  return crypto.randomUUID()
+}
 
 export function useSessionRun() {
   const [sessionId, setSessionId] = useState<string | null>(null)
-  const [goal, setGoal] = useState('分析这个数据集')
+  const [goal, setGoal] = useState('')
   const [maxIter, setMaxIter] = useState(15)
   const [events, setEvents] = useState<WsEvent[]>([])
   const [finalAnswer, setFinalAnswer] = useState('')
+  const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [uploadMeta, setUploadMeta] = useState<UploadMeta>(null)
   const [status, setStatus] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [uploadReady, setUploadReady] = useState(false)
   const [phase, setPhase] = useState<Phase>('idle')
   const wsRef = useRef<WebSocket | null>(null)
+  const lastQueryRef = useRef('')
 
   const appendEvent = useCallback((e: WsEvent) => {
     setEvents((prev) => [...prev.slice(-200), e])
@@ -45,8 +64,12 @@ export function useSessionRun() {
       setSessionId(j.session_id)
       setEvents([])
       setFinalAnswer('')
+      setMessages([])
       setUploadReady(false)
-      setStatus(`会话已创建。`)
+      setUploadMeta(null)
+      setGoal('')
+      lastQueryRef.current = ''
+      setStatus('会话已创建。')
       setPhase('idle')
     } catch (e) {
       setError(e instanceof Error ? e.message : '创建会话时网络异常')
@@ -69,16 +92,23 @@ export function useSessionRun() {
           setError(`上传失败（HTTP ${r.status}）`)
           setStatus('')
           setUploadReady(false)
+          setUploadMeta(null)
           setPhase('idle')
           return
         }
         const j = (await r.json()) as { rows: number; columns: string[] }
         setUploadReady(true)
-        setStatus(`已上传 ${j.rows} 行；列：${j.columns.join('、')}`)
+        setUploadMeta({
+          fileName: file.name,
+          fileSize: file.size,
+          rows: j.rows,
+        })
+        setStatus(`已上传 ${j.rows} 条房源记录`)
         setPhase('idle')
       } catch (e) {
         setError(e instanceof Error ? e.message : '上传时网络异常')
         setUploadReady(false)
+        setUploadMeta(null)
         setStatus('')
         setPhase('idle')
       }
@@ -86,63 +116,110 @@ export function useSessionRun() {
     [sessionId],
   )
 
-  const startRun = useCallback(() => {
-    if (!sessionId) {
-      setError('请先创建会话并上传 CSV。')
-      return
-    }
-    if (!uploadReady) {
-      setError('请先选择并上传 CSV 文件。')
-      return
-    }
-    setError(null)
+  const clearConversation = useCallback(() => {
     wsRef.current?.close()
     wsRef.current = null
+    setMessages([])
     setEvents([])
     setFinalAnswer('')
-    setPhase('running')
-    setStatus('连接 WebSocket…')
+    setGoal('')
+    lastQueryRef.current = ''
+    setStatus('')
+    setError(null)
+    setPhase('idle')
+  }, [])
 
-    const ws = new WebSocket(wsUrl(sessionId))
-    wsRef.current = ws
-
-    ws.onopen = () => {
-      setStatus('已连接，正在执行分析…')
-      ws.send(JSON.stringify({ cmd: 'run', goal, max_iterations: maxIter }))
-    }
-
-    ws.onmessage = (ev) => {
-      try {
-        const msg = JSON.parse(ev.data as string) as WsEvent
-        appendEvent(msg)
-        if (msg.event === 'final') {
-          setFinalAnswer(String(msg.final_answer ?? ''))
-        }
-        if (msg.event === 'done') {
-          setStatus('分析完成。')
-          setPhase('complete')
-        }
-        if (msg.event === 'error') {
-          const m = String(msg.message ?? '')
-          setError(m || '服务端返回错误')
-          setStatus('')
-          setPhase('idle')
-        }
-      } catch {
-        appendEvent({ event: 'parse_error', raw: ev.data })
+  const sendQuery = useCallback(
+    (text: string) => {
+      const trimmed = text.trim()
+      if (!trimmed) {
+        setError('请输入分析问题。')
+        return
       }
-    }
-
-    ws.onerror = () => {
-      setError('WebSocket 连接异常，请确认后端已启动且代理配置正确。')
-      setStatus('')
-      setPhase('idle')
-    }
-
-    ws.onclose = () => {
+      if (!sessionId) {
+        setError('请先创建会话并上传 CSV。')
+        return
+      }
+      if (!uploadReady) {
+        setError('请先上传 CSV 文件。')
+        return
+      }
+      setError(null)
+      wsRef.current?.close()
       wsRef.current = null
-    }
-  }, [sessionId, goal, maxIter, uploadReady, appendEvent])
+      setEvents([])
+      setFinalAnswer('')
+      setGoal(trimmed)
+      lastQueryRef.current = trimmed
+      setMessages((prev) => [...prev, { id: newId(), role: 'user', content: trimmed }])
+      setPhase('running')
+      setStatus('连接 WebSocket…')
+
+      const ws = new WebSocket(wsUrl(sessionId))
+      wsRef.current = ws
+
+      ws.onopen = () => {
+        setStatus('分析进行中…')
+        ws.send(JSON.stringify({ cmd: 'run', goal: trimmed, max_iterations: maxIter }))
+      }
+
+      ws.onmessage = (ev) => {
+        try {
+          const msg = JSON.parse(ev.data as string) as WsEvent
+          appendEvent(msg)
+          if (msg.event === 'final') {
+            const ans = String(msg.final_answer ?? '')
+            setFinalAnswer(ans)
+            setMessages((prev) => [...prev, { id: newId(), role: 'assistant', content: ans }])
+          }
+          if (msg.event === 'done') {
+            setStatus('分析完成。')
+            setPhase('complete')
+          }
+          if (msg.event === 'error') {
+            const m = String(msg.message ?? '')
+            const errText = m || '服务端返回错误'
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: newId(),
+                role: 'assistant',
+                content: `**分析出错**\n\n${errText}`,
+              },
+            ])
+            setStatus('')
+            setPhase('idle')
+          }
+        } catch {
+          appendEvent({ event: 'parse_error', raw: ev.data })
+        }
+      }
+
+      ws.onerror = () => {
+        const errText = 'WebSocket 连接异常，请确认后端已启动且代理配置正确。'
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: newId(),
+            role: 'assistant',
+            content: `**连接失败**\n\n${errText}`,
+          },
+        ])
+        setStatus('')
+        setPhase('idle')
+      }
+
+      ws.onclose = () => {
+        wsRef.current = null
+      }
+    },
+    [sessionId, uploadReady, maxIter, appendEvent],
+  )
+
+  const retryLastQuery = useCallback(() => {
+    const t = lastQueryRef.current
+    if (t) sendQuery(t)
+  }, [sendQuery])
 
   const clearError = useCallback(() => {
     setError(null)
@@ -154,7 +231,11 @@ export function useSessionRun() {
     setSessionId(null)
     setEvents([])
     setFinalAnswer('')
+    setMessages([])
     setUploadReady(false)
+    setUploadMeta(null)
+    setGoal('')
+    lastQueryRef.current = ''
     setStatus('')
     setError(null)
     setPhase('idle')
@@ -170,14 +251,18 @@ export function useSessionRun() {
     setMaxIter,
     events,
     finalAnswer,
+    messages,
     status,
     error,
     uploadReady,
+    uploadMeta,
     phase,
     isFormBusy,
     createSession,
     uploadFile,
-    startRun,
+    sendQuery,
+    retryLastQuery,
+    clearConversation,
     clearError,
     reset,
   }

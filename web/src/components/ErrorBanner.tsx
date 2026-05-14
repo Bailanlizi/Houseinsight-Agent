@@ -13,11 +13,11 @@ export function ErrorBanner({ message, onDismiss, onRetry, retryLabel = '重试�
       <p className="error-banner__text">{message}</p>
       <div className="error-banner__actions">
         {onRetry && (
-          <button type="button" className="btn btn--secondary" onClick={onRetry}>
+          <button type="button" className="btn btn-secondary" onClick={onRetry}>
             {retryLabel}
           </button>
         )}
-        <button type="button" className="btn btn--ghost" onClick={onDismiss}>
+        <button type="button" className="btn btn-ghost" onClick={onDismiss}>
           关闭
         </button>
       </div>
