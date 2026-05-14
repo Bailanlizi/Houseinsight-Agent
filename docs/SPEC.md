@@ -96,6 +96,13 @@
 | `iteration` | int | 自增；硬上限默认 **15**（可配置） |
 | `stop_reason` | str | `max_iterations` / `completed` / `error` / `user_abort` |
 | `final_answer` | str | 最终用户可见回复 |
+| `prior_transcript` | str | **会话内多轮**：由上一轮 `messages` 格式化的节选，仅写入本轮 `initial`，供 LLM prompt；不写入 checkpoint 全表 |
+
+### 4.2.1 会话内多轮（非持久化）
+
+- 同一 `session_id` 下多次 `POST /sessions/{id}/run` 或 WebSocket `cmd:run`：从 `last_state.messages` 生成 `prior_transcript`（「用户：/助手：」文本，**尾部**截断，上限见环境变量 `MAX_PRIOR_TRANSCRIPT_CHARS`，默认 4000）；`plan` / `observe` / `answer` 的 prompt 均携带该节选；**每轮** `execution_history` 与迭代仍从空/零开始，与上一轮工具轨迹不混用。  
+- `answer` 节点将本轮 `final_answer` 追加为 `AIMessage`，以便下一轮持久化到 `last_state`。  
+- **不**跨进程：服务重启后无对话历史；与 §1.3「不承诺跨会话长期记忆」一致，此处为同会话多轮而非账号级记忆。
 
 ---
 
@@ -214,7 +221,8 @@
 
 - `tests/tools/`：各工具单元测试  
 - 图集成测试：mock LLM 固定输出  
-- 可选 integration：真实 DashScope 冒烟（CI 跳过无 key）
+- 可选 integration：真实 DashScope 冒烟（CI 跳过无 key）  
+- **功能与性能指标**：[METRICS.md](METRICS.md)（FC/PF 与 §13 映射、perf 运行方式）
 
 ---
 

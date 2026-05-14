@@ -152,6 +152,39 @@
 
 ---
 
+## Task 9: 功能指标与性能基线
+
+**Description:** 文档化 FC/PF 指标（与 SPEC §13 对齐）；`tests/test_functional_metrics.py` 覆盖 REST/WS 行为；`tests/perf/` 提供 mock 下耗时基线；默认 `pytest` 排除 `@pytest.mark.perf`。
+
+**Acceptance criteria:**
+
+- [x] [docs/METRICS.md](docs/METRICS.md) 维护指标表与运行说明
+- [x] `pytest` 全绿（默认不跑 perf）；`pytest -m perf tests/perf/` 可单独执行
+- [x] [README.md](../README.md) 说明测试命令
+
+**Verification:** `pytest`；`pytest -m perf tests/perf/`
+
+**Dependencies:** 无（文档与测试增量）
+
+**Files likely touched:** `docs/METRICS.md`, `tests/conftest.py`, `tests/helpers/`, `tests/test_functional_metrics.py`, `tests/perf/`, `pyproject.toml`, `README.md`
+
+---
+
+## Task 10: 会话内多轮对话
+
+**Description:** 同一会话多次 `run` 时，将上一轮 `messages` 格式化为 `prior_transcript` 注入 `plan` / `observe` / `answer`；`answer` 追加 `AIMessage(final_answer)`；REST/WS/`cli` 共用 `build_initial_agent_state`；`GET /sessions/{id}/state` 返回 `messages`。
+
+**Acceptance criteria:**
+
+- [x] 第二轮 `run` 的 `prior_transcript` 含第一轮用户/助手文本（见 `tests/test_run_context.py`）
+- [x] SPEC §4.2 补充 `prior_transcript` 与多轮说明
+
+**Verification:** `pytest tests/test_run_context.py`；全量 `pytest`
+
+**Files touched:** `server/agent/run_context.py`, `server/agent/state.py`, `server/core/config.py`, `server/agent/nodes.py`, `server/agent/prompts.py`, `server/api/routes.py`, `server/api/ws.py`, `server/cli.py`, `docs/SPEC.md`, `tests/test_run_context.py`
+
+---
+
 ## 建议实现顺序
 
 `1 → 2 → 3 → 4 → 5 → 7 → 8 → 6（MVP 握手）`

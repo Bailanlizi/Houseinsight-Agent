@@ -8,9 +8,8 @@ import time
 from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-from langchain_core.messages import HumanMessage
-
 from server.agent.graph import run_agent_streaming
+from server.agent.run_context import build_initial_agent_state
 from server.agent.state import AgentState
 from server.api.event_hub import SessionEventHub, get_event_hub
 from server.api.routes import _session_meta, persist_session_state
@@ -63,19 +62,10 @@ async def _run_streaming_task(
 ) -> None:
     lock = _ensure_run_lock(session_id)
     async with lock:
-        initial: AgentState = {
-            "messages": [HumanMessage(content=goal)],
-            "session_id": session_id,
-            "goal": goal,
-            "max_iterations": max_iterations,
-            "data_profile": {},
-            "plan": [],
-            "execution_history": [],
-            "iteration": 0,
-            "stop_reason": "",
-            "should_finish": False,
-            "final_answer": "",
-        }
+        last_state = _session_meta[session_id].get("last_state")
+        initial: AgentState = build_initial_agent_state(
+            session_id, goal, max_iterations, last_state
+        )
 
         def emit(ev: dict[str, Any]) -> None:
             ev2 = {**ev, "ts": time.time()}

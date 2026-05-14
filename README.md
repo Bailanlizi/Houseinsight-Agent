@@ -16,8 +16,14 @@ pip install -e ".[dev]"
 ## 常用命令
 
 ```bash
-# 单元测试
+# 单元测试（默认不含 @pytest.mark.perf 性能用例）
 pytest
+
+# 性能基线（mock LLM，较慢）
+pytest -m perf tests/perf/
+
+# 全部用例含 perf
+pytest -m "" --override-ini="addopts="
 
 # 静态检查（可选）
 ruff check server tests
@@ -26,6 +32,8 @@ ruff format server tests
 # 启动 API
 uvicorn server.main:app --reload --host 0.0.0.0 --port 8000
 ```
+
+指标说明见 [docs/METRICS.md](docs/METRICS.md)。SPEC §13 验收：`pytest tests/test_spec_success_criteria.py`。
 
 ## Web 前端（Vite + React）
 

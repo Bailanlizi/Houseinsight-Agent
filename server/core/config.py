@@ -27,6 +27,13 @@ class Settings(BaseSettings):
     max_upload_bytes: int = Field(default=10 * 1024 * 1024, validation_alias="MAX_UPLOAD_BYTES")
     max_csv_rows: int = Field(default=200_000, validation_alias="MAX_CSV_ROWS")
 
+    max_prior_transcript_chars: int = Field(
+        default=4000,
+        ge=500,
+        le=50_000,
+        validation_alias="MAX_PRIOR_TRANSCRIPT_CHARS",
+    )
+
     @property
     def llm_configured(self) -> bool:
         return bool(self.openai_api_key and self.openai_api_key.strip())

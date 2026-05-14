@@ -24,6 +24,7 @@ class ExecutionRecord(TypedDict, total=False):
 
 class AgentState(TypedDict, total=False):
     messages: Annotated[Sequence[BaseMessage], add_messages]
+    prior_transcript: str  # 上一轮及更早对话的节选（仅 initial 写入，供 prompt）
     session_id: str
     goal: str
     max_iterations: int

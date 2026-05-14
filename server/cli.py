@@ -6,10 +6,10 @@ import uuid
 import pandas as pd
 
 from server.agent.graph import run_agent
+from server.agent.run_context import build_initial_agent_state
 from server.agent.state import AgentState
 from server.core.config import get_settings
 from server.core.session_store import get_session_store
-from langchain_core.messages import HumanMessage
 
 
 def cmd_run(args: argparse.Namespace) -> int:
@@ -17,19 +17,9 @@ def cmd_run(args: argparse.Namespace) -> int:
     sid = str(uuid.uuid4())
     get_session_store().put(sid, df)
     s = get_settings()
-    initial: AgentState = {
-        "messages": [HumanMessage(content=args.goal)],
-        "session_id": sid,
-        "goal": args.goal,
-        "max_iterations": args.max_iterations or s.max_iterations,
-        "data_profile": {},
-        "plan": [],
-        "execution_history": [],
-        "iteration": 0,
-        "stop_reason": "",
-        "should_finish": False,
-        "final_answer": "",
-    }
+    initial: AgentState = build_initial_agent_state(
+        sid, args.goal, args.max_iterations or s.max_iterations, None
+    )
     out = run_agent(initial)
     print(out.get("final_answer", ""))
     return 0

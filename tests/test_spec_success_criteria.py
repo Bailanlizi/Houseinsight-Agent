@@ -2,55 +2,31 @@
 from __future__ import annotations
 
 import uuid
-from pathlib import Path
 
 import pandas as pd
 import pytest
-from langchain_core.messages import HumanMessage
-
 from server.agent.graph import run_agent
-from server.agent.state import AgentState
 from server.core.session_store import get_session_store
 from server.tools._dataframe import ensure_row_fingerprint
 from server.tools.clean_tools import parse_numeric_column
 from server.tools.register import dispatch_tool
 
-DATA_DIR = Path(__file__).resolve().parent / "data"
-WENJIANG_CSV = DATA_DIR / "温江.csv"
+from tests.helpers.agent_fixtures import (
+    WENJIANG_CSV,
+    assert_execution_history_shape,
+    load_wenjiang_df,
+    make_initial_state,
+)
 
 
-@pytest.fixture
-def mock_llm_env(monkeypatch):
-    monkeypatch.setenv("HI_MOCK_LLM", "1")
-    monkeypatch.setenv("OPENAI_API_KEY", "")
-    from server.core.config import get_settings
-
-    get_settings.cache_clear()
-    yield
-    get_settings.cache_clear()
-
-
-def test_autonomy_pipeline_uses_real_fixture(mock_llm_env, monkeypatch):
+def test_autonomy_pipeline_uses_real_fixture(mock_llm_env, mock_llm_nodes):
     """§13.1 + §13.4：自主完成清洗+聚合；execution_history 可追溯。"""
-    monkeypatch.setattr("server.agent.nodes._use_mock_llm", lambda: True)
     assert WENJIANG_CSV.is_file(), f"missing fixture: {WENJIANG_CSV}"
-    df = pd.read_csv(WENJIANG_CSV, nrows=80)
+    df = load_wenjiang_df(80)
     sid = str(uuid.uuid4())
     get_session_store().put(sid, df)
 
-    initial: AgentState = {
-        "messages": [HumanMessage(content="analyze dataset")],
-        "session_id": sid,
-        "goal": "analyze dataset",
-        "max_iterations": 14,
-        "data_profile": {},
-        "plan": [],
-        "execution_history": [],
-        "iteration": 0,
-        "stop_reason": "",
-        "should_finish": False,
-        "final_answer": "",
-    }
+    initial = make_initial_state(sid, "analyze dataset", max_iterations=14)
     out = run_agent(initial)
     hist = out.get("execution_history") or []
     tools = [h.get("tool") for h in hist]
@@ -60,10 +36,7 @@ def test_autonomy_pipeline_uses_real_fixture(mock_llm_env, monkeypatch):
     assert "group_by_summary" in tools
     assert out.get("final_answer")
 
-    for rec in hist:
-        assert "tool" in rec
-        assert "arguments" in rec
-        assert "summary" in rec
+    assert_execution_history_shape(hist)
 
 
 def test_row_fingerprint_and_cell_consistency():
@@ -108,26 +81,13 @@ def test_adaptation_tool_sequence_changes():
     assert h1[0]["ok"] is False and h1[1]["ok"] is True
 
 
-def test_max_iterations_stops_cleanly(mock_llm_env, monkeypatch):
+def test_max_iterations_stops_cleanly(mock_llm_env, mock_llm_nodes, monkeypatch):
     """§13.5：低 MAX_ITER 下仍能结束并给出 final_answer。"""
-    monkeypatch.setattr("server.agent.nodes._use_mock_llm", lambda: True)
     df = pd.DataFrame({"a": [1, 2], "区域": ["X", "Y"]})
     sid = str(uuid.uuid4())
     get_session_store().put(sid, df)
 
-    initial: AgentState = {
-        "messages": [HumanMessage(content="x")],
-        "session_id": sid,
-        "goal": "x",
-        "max_iterations": 1,
-        "data_profile": {},
-        "plan": [],
-        "execution_history": [],
-        "iteration": 0,
-        "stop_reason": "",
-        "should_finish": False,
-        "final_answer": "",
-    }
+    initial = make_initial_state(sid, "x", max_iterations=1)
     out = run_agent(initial)
     assert out.get("final_answer")
     assert out.get("stop_reason") in ("max_iterations", "completed", "error")

@@ -8,11 +8,11 @@ from typing import Any
 
 import pandas as pd
 from fastapi import APIRouter, File, HTTPException, UploadFile
-from langchain_core.messages import BaseMessage, HumanMessage
+from langchain_core.messages import BaseMessage
 from pydantic import BaseModel, Field
 
 from server.agent.graph import run_agent
-from server.agent.state import AgentState
+from server.agent.run_context import build_initial_agent_state
 from server.core.config import get_settings
 from server.core.session_store import get_session_store
 from server.tools.explore_tools import get_data_profile
@@ -91,20 +91,8 @@ async def run_session(session_id: str, body: RunBody) -> dict:
 
     s = get_settings()
     max_iter = int(body.options.get("max_iterations", s.max_iterations))
-
-    initial: AgentState = {
-        "messages": [HumanMessage(content=body.goal)],
-        "session_id": session_id,
-        "goal": body.goal,
-        "max_iterations": max_iter,
-        "data_profile": {},
-        "plan": [],
-        "execution_history": [],
-        "iteration": 0,
-        "stop_reason": "",
-        "should_finish": False,
-        "final_answer": "",
-    }
+    last_state = _session_meta[session_id].get("last_state")
+    initial = build_initial_agent_state(session_id, body.goal, max_iter, last_state)
     out = run_agent(initial)
     fa = out.get("final_answer") or ""
     persist_session_state(session_id, out)
@@ -137,6 +125,7 @@ async def session_state(session_id: str) -> dict:
         "iteration": st.get("iteration"),
         "stop_reason": st.get("stop_reason"),
         "execution_history": st.get("execution_history"),
+        "messages": st.get("messages"),
         "final_answer": st.get("final_answer") or _session_meta[session_id].get("final_answer"),
     }
 

@@ -7,8 +7,9 @@ from typing import Any, Literal
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
+from server.agent.plan_schema import PlanStructuredOutput, plan_steps_to_plan_dicts
 from server.agent.prompts import (
     ANSWER_PROMPT,
     INTENT_AND_FILTER_GUIDE,
@@ -25,16 +26,6 @@ from server.tools.explore_tools import get_data_profile
 from server.tools.register import TOOL_REGISTRY, dispatch_tool
 
 logger = logging.getLogger(__name__)
-
-
-class PlanStepModel(BaseModel):
-    tool: str
-    arguments: dict[str, Any] = Field(default_factory=dict)
-    rationale: str | None = None
-
-
-class PlanLLMOutput(BaseModel):
-    steps: list[PlanStepModel]
 
 
 class ObserveLLMOutput(BaseModel):
@@ -57,6 +48,13 @@ def _history_excerpt(history: list[ExecutionRecord], limit: int = 2000) -> str:
         return s + ("…" if len(s) == limit else "")
     except Exception:  # noqa: BLE001
         return str(history[-8:])[:limit]
+
+
+def _prior_for_prompt(state: AgentState) -> str:
+    t = state.get("prior_transcript")
+    if isinstance(t, str) and t.strip():
+        return t
+    return "（无）"
 
 
 def _use_mock_llm() -> bool:
@@ -245,21 +243,22 @@ def _llm_plan(state: AgentState) -> tuple[list[PlanStepDict], str | None]:
         PLAN_PROMPT.format(
             tool_names=tool_names,
             profile_excerpt=_profile_excerpt(state.get("data_profile", {})),
+            prior_transcript=_prior_for_prompt(state),
             goal=state.get("goal", ""),
             history_excerpt=_history_excerpt(state.get("execution_history", [])),
         )
         + INTENT_AND_FILTER_GUIDE
     )
     model = get_chat_model()
-    structured = model.with_structured_output(PlanLLMOutput)
+    structured = model.with_structured_output(PlanStructuredOutput)
     try:
-        out: PlanLLMOutput = structured.invoke(
+        out: PlanStructuredOutput = structured.invoke(
             [
                 SystemMessage(content=SYSTEM_ZH),
                 HumanMessage(content=prompt),
             ]
         )
-        return [s.model_dump(exclude_none=True) for s in out.steps][:3], None
+        return plan_steps_to_plan_dicts(list(out.steps))[:3], None
     except Exception as e:  # noqa: BLE001
         logger.warning("LLM plan failed: %s", e)
         return [], f"计划生成失败（结构化输出不可用）: {e}"
@@ -398,7 +397,11 @@ def _llm_observe(state: AgentState) -> dict[str, Any]:
             "stop_reason": "error",
             "notes": f"工具或计划失败：{last.get('error')}",
         }
-    prompt = OBSERVE_PROMPT.format(goal=state.get("goal", ""), last_result=json.dumps(last, ensure_ascii=False))
+    prompt = OBSERVE_PROMPT.format(
+        prior_transcript=_prior_for_prompt(state),
+        goal=state.get("goal", ""),
+        last_result=json.dumps(last, ensure_ascii=False),
+    )
     model = get_chat_model()
     structured = model.with_structured_output(ObserveLLMOutput)
     try:
@@ -455,9 +458,11 @@ def answer_node(state: AgentState, config: RunnableConfig) -> dict[str, Any]:
             if hist and isinstance(hist[-1], dict) and hist[-1].get("error"):
                 err_hint = f"\n- 最近错误：**{hist[-1].get('error')}**"
             lines.append(err_hint or "\n- 最近一步执行失败，请查看 `execution_history` 中的 error。")
-        return {"final_answer": "\n".join(lines)}
+        text = "\n".join(lines)
+        return {"final_answer": text, "messages": [AIMessage(content=text)]}
 
     prompt = ANSWER_PROMPT.format(
+        prior_transcript=_prior_for_prompt(state),
         goal=state.get("goal", ""),
         profile_excerpt=_profile_excerpt(state.get("data_profile", {})),
         history_excerpt=_history_excerpt(state.get("execution_history", [])),
@@ -466,7 +471,8 @@ def answer_node(state: AgentState, config: RunnableConfig) -> dict[str, Any]:
     try:
         resp = model.invoke([SystemMessage(content=SYSTEM_ZH), HumanMessage(content=prompt)])
         text = getattr(resp, "content", str(resp))
-        return {"final_answer": str(text)}
+        fa = str(text)
+        return {"final_answer": fa, "messages": [AIMessage(content=fa)]}
     except Exception as e:  # noqa: BLE001
         logger.warning("answer LLM failed, fallback to summary: %s", e)
         prof = state.get("data_profile", {}) or {}
@@ -477,7 +483,8 @@ def answer_node(state: AgentState, config: RunnableConfig) -> dict[str, Any]:
             f"- 停止原因：**{state.get('stop_reason', '') or 'completed'}**",
             "- 已执行工具见 `execution_history`；若需完整结论请检查 API Key 与网络后重试。",
         ]
-        return {"final_answer": "\n".join(lines)}
+        fa = "\n".join(lines)
+        return {"final_answer": fa, "messages": [AIMessage(content=fa)]}
 
 
 def route_after_explore(state: AgentState) -> Literal["plan", "answer"]:
