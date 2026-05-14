@@ -1,183 +1,148 @@
-import { useCallback, useRef, useState } from 'react'
+import { ErrorBanner } from './components/ErrorBanner'
+import { EventLog } from './components/EventLog'
+import { FinalAnswerPanel } from './components/FinalAnswerPanel'
+import { SessionStepper } from './components/SessionStepper'
+import { useSessionRun } from './hooks/useSessionRun'
 import './App.css'
 
-type WsEvent = Record<string, unknown>
-
-function apiBase(): string {
-  const b = import.meta.env.VITE_API_BASE as string | undefined
-  return b?.replace(/\/$/, '') ?? ''
-}
-
-function wsUrl(sessionId: string): string {
-  const api = import.meta.env.VITE_API_BASE as string | undefined
-  if (api) {
-    const u = new URL(api)
-    u.protocol = u.protocol === 'https:' ? 'wss:' : 'ws:'
-    u.pathname = `/sessions/${sessionId}/ws`
-    u.search = ''
-    u.hash = ''
-    return u.toString()
-  }
-  const proto = location.protocol === 'https:' ? 'wss' : 'ws'
-  return `${proto}://${location.host}/sessions/${sessionId}/ws`
-}
-
-async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
-  const base = apiBase()
-  const url = base ? `${base}${path}` : path
-  return fetch(url, init)
-}
-
 export default function App() {
-  const [sessionId, setSessionId] = useState<string | null>(null)
-  const [goal, setGoal] = useState('分析这个数据集')
-  const [maxIter, setMaxIter] = useState(15)
-  const [events, setEvents] = useState<WsEvent[]>([])
-  const [finalAnswer, setFinalAnswer] = useState('')
-  const [status, setStatus] = useState('')
-  const wsRef = useRef<WebSocket | null>(null)
-
-  const appendEvent = useCallback((e: WsEvent) => {
-    setEvents((prev) => [...prev.slice(-200), e])
-  }, [])
-
-  const createSession = async () => {
-    setStatus('创建会话…')
-    const r = await apiFetch('/sessions', { method: 'POST' })
-    if (!r.ok) {
-      setStatus(`创建失败: ${r.status}`)
-      return
-    }
-    const j = (await r.json()) as { session_id: string }
-    setSessionId(j.session_id)
-    setEvents([])
-    setFinalAnswer('')
-    setStatus(`会话已创建: ${j.session_id}`)
-  }
-
-  const onUpload = async (file: File | null) => {
-    if (!file || !sessionId) return
-    setStatus('上传 CSV…')
-    const fd = new FormData()
-    fd.append('file', file)
-    const r = await apiFetch(`/sessions/${sessionId}/upload`, { method: 'POST', body: fd })
-    if (!r.ok) {
-      setStatus(`上传失败: ${r.status}`)
-      return
-    }
-    const j = (await r.json()) as { rows: number; columns: string[] }
-    setStatus(`已上传 ${j.rows} 行，列: ${j.columns.join(', ')}`)
-  }
-
-  const runAnalysis = () => {
-    if (!sessionId) {
-      setStatus('请先创建会话并上传 CSV')
-      return
-    }
-    wsRef.current?.close()
-    setEvents([])
-    setFinalAnswer('')
-    setStatus('连接 WebSocket…')
-    const ws = new WebSocket(wsUrl(sessionId))
-    wsRef.current = ws
-    ws.onopen = () => {
-      setStatus('已连接，发送 run…')
-      ws.send(JSON.stringify({ cmd: 'run', goal, max_iterations: maxIter }))
-    }
-    ws.onmessage = (ev) => {
-      try {
-        const msg = JSON.parse(ev.data as string) as WsEvent
-        appendEvent(msg)
-        if (msg.event === 'final') {
-          setFinalAnswer(String(msg.final_answer ?? ''))
-        }
-        if (msg.event === 'done') {
-          setStatus('分析完成')
-        }
-        if (msg.event === 'error') {
-          setStatus(`错误: ${String(msg.message ?? '')}`)
-        }
-      } catch {
-        appendEvent({ event: 'parse_error', raw: ev.data })
-      }
-    }
-    ws.onerror = () => setStatus('WebSocket 错误')
-    ws.onclose = () => {
-      wsRef.current = null
-    }
-  }
+  const run = useSessionRun()
 
   return (
     <div className="app">
       <header className="header">
         <h1>HouseInsight Agent</h1>
-        <p className="muted">上传 CSV → 输入目标 → WebSocket 实时进度</p>
+        <p className="header__lede">上传 CSV，输入分析目标，通过 WebSocket 查看实时进度与最终回答。</p>
       </header>
 
-      <section className="panel">
-        <button type="button" onClick={createSession}>
-          1. 创建会话
-        </button>
-        {sessionId && (
-          <span className="sid">
-                会话 ID: <code>{sessionId}</code>
-              </span>
-        )}
-      </section>
+      <ErrorBanner
+        message={run.error}
+        onDismiss={run.clearError}
+        onRetry={run.uploadReady ? run.startRun : undefined}
+        retryLabel="重试分析"
+      />
 
-      <section className="panel">
-        <label>
-          2. 选择 CSV
-          <input
-            type="file"
-            accept=".csv,text/csv"
-            disabled={!sessionId}
-            onChange={(e) => void onUpload(e.target.files?.[0] ?? null)}
-          />
-        </label>
-      </section>
+      <SessionStepper
+        hasSession={!!run.sessionId}
+        hasUpload={run.uploadReady}
+        hasResult={run.finalAnswer.trim().length > 0}
+      />
 
-      <section className="panel">
-        <label>
-          分析目标
-          <textarea value={goal} onChange={(e) => setGoal(e.target.value)} rows={3} />
-        </label>
-        <label>
-          最大迭代
-          <input
-            type="number"
-            min={1}
-            max={50}
-            value={maxIter}
-            onChange={(e) => setMaxIter(Number(e.target.value) || 15)}
-          />
-        </label>
-        <button type="button" disabled={!sessionId} onClick={runAnalysis}>
-          3. 开始分析（WebSocket）
-        </button>
-      </section>
-
-      <p className="status">{status}</p>
-
-      <section className="split">
-        <div className="col">
-          <h2>事件流</h2>
-          <ul className="events">
-            {events.map((e, i) => (
-              <li key={i}>
-                <strong>{String(e.event)}</strong>
-                {e.node != null && <span> · {String(e.node)}</span>}
-                {e.tool != null && <span> · {String(e.tool)}</span>}
-                {e.ok != null && <span> · ok={String(e.ok)}</span>}
-              </li>
-            ))}
-          </ul>
+      {(run.phase === 'creating' || run.phase === 'uploading') && (
+        <div className="skeleton-block" aria-busy="true" aria-label="请求处理中">
+          <div className="skeleton skeleton--line" />
+          <div className="skeleton skeleton--line skeleton--short" />
         </div>
-        <div className="col">
-          <h2>最终回答</h2>
-          <pre className="answer">{finalAnswer || '—'}</pre>
-        </div>
-      </section>
+      )}
+
+      <form
+        id="analysis-workflow-form"
+        className="workflow-form"
+        aria-busy={run.isFormBusy}
+        noValidate
+        onSubmit={(e) => {
+          e.preventDefault()
+        }}
+      >
+        <fieldset className="fieldset" disabled={run.isFormBusy}>
+          <legend className="visually-hidden">分析工作流</legend>
+
+          <section className="panel" aria-labelledby="step-create-heading">
+            <h2 id="step-create-heading" className="panel__title">
+              步骤 1：会话
+            </h2>
+            <div className="panel__row">
+              <button type="button" onClick={() => void run.createSession()}>
+                创建会话
+              </button>
+              {run.sessionId && (
+                <p className="panel__meta" id="session-id-label">
+                  当前会话 ID：<code>{run.sessionId}</code>
+                </p>
+              )}
+            </div>
+          </section>
+
+          <section className="panel" aria-labelledby="step-upload-heading">
+            <h2 id="step-upload-heading" className="panel__title">
+              步骤 2：数据文件
+            </h2>
+            <div className="panel__row">
+              <label htmlFor="csv-upload" className="label">
+                选择 CSV 文件
+              </label>
+              <input
+                id="csv-upload"
+                type="file"
+                accept=".csv,text/csv"
+                disabled={!run.sessionId || run.isFormBusy}
+                aria-describedby="session-id-label csv-upload-hint"
+                onChange={(e) => void run.uploadFile(e.target.files?.[0] ?? null)}
+              />
+              <p id="csv-upload-hint" className="hint">
+                需先创建会话；仅支持 .csv。
+              </p>
+            </div>
+          </section>
+
+          <section className="panel" aria-labelledby="step-run-heading">
+            <h2 id="step-run-heading" className="panel__title">
+              步骤 3：目标与运行
+            </h2>
+            <div className="panel__stack">
+              <label htmlFor="analysis-goal" className="label">
+                分析目标
+              </label>
+              <textarea
+                id="analysis-goal"
+                value={run.goal}
+                onChange={(e) => run.setGoal(e.target.value)}
+                rows={3}
+                disabled={run.isFormBusy}
+                aria-describedby="goal-hint"
+              />
+              <p id="goal-hint" className="hint">
+                用自然语言描述你希望从数据中得到的信息。
+              </p>
+
+              <label htmlFor="analysis-max-iter" className="label">
+                最大迭代次数
+              </label>
+              <input
+                id="analysis-max-iter"
+                type="number"
+                min={1}
+                max={50}
+                value={run.maxIter}
+                onChange={(e) => run.setMaxIter(Number(e.target.value) || 15)}
+                disabled={run.isFormBusy}
+                aria-describedby="iter-hint"
+              />
+              <p id="iter-hint" className="hint">
+                限制 Agent 循环次数，防止过长运行（默认 15）。
+              </p>
+
+              <button
+                type="button"
+                disabled={!run.sessionId || run.isFormBusy}
+                aria-busy={run.phase === 'running'}
+                onClick={run.startRun}
+              >
+                开始分析（WebSocket）
+              </button>
+            </div>
+          </section>
+        </fieldset>
+      </form>
+
+      <p className={`status-line ${run.status ? 'status-line--visible' : ''}`} role="status">
+        {run.status || '\u00a0'}
+      </p>
+
+      <div className="split">
+        <EventLog events={run.events} />
+        <FinalAnswerPanel text={run.finalAnswer} />
+      </div>
     </div>
   )
 }

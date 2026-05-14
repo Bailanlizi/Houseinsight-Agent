@@ -1,5 +1,16 @@
 # React + TypeScript + Vite
 
+## HouseInsight Web：手动验证清单
+
+在改 UI / 无障碍 / 样式后，建议按下列项做一次抽样检查（与 `frontend-ui-engineering` 的 Verification 对齐）。
+
+- **键盘与焦点**：从页面顶部开始用 `Tab` 顺序遍历所有可聚焦控件（按钮、文件选择、文本框、数字框）；确认可见焦点环（`focus-visible`）清晰；`Shift+Tab` 反向无陷阱。
+- **读屏与实时区域**：启动一次分析后，确认「事件流」区域对追加事件有适度播报（`aria-live="polite"`）；运行中主表单或「开始分析」按钮带有忙碌语义（`aria-busy`）。
+- **视口宽度**：在开发者工具中将宽度分别设为 **320px**、**768px**、**1024px**，确认步骤条换行、双栏变单栏、表单与日志无重叠或横向溢出。
+- **Lighthouse**：Chrome DevTools → Lighthouse → 勾选 **Accessibility**，对当前页跑一次抽样；关注对比度、名称/标签、ARIA 相关提示并逐项核对。
+
+---
+
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
 Currently, two official plugins are available:
