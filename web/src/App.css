@@ -37,6 +37,8 @@
   --font-mono: 'JetBrains Mono', ui-monospace, Consolas, monospace;
   --ease: cubic-bezier(0.33, 1, 0.68, 1);
   --dur: 220ms;
+  /* 主内容区左右留白：约 1.5%–3% 视口宽，小屏不小于 12px */
+  --hi-page-gutter-x: max(12px, min(2.5vw, 3rem));
 }
 
 @media (prefers-color-scheme: dark) {
@@ -87,23 +89,39 @@
 }
 
 .hi-app {
-  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 100%;
+  min-height: 100dvh;
   font-family: var(--font);
   color: var(--text-primary);
   background: var(--bg-secondary);
 }
 
+.hi-app > .hi-header,
+.hi-app > .error-banner,
+.hi-app > .hi-tabs {
+  flex-shrink: 0;
+}
+
+.hi-app > .hi-layout {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
 /* Header */
 .hi-header {
-  padding: var(--sp-5) var(--sp-4) var(--sp-4);
+  padding: var(--sp-5) var(--hi-page-gutter-x) var(--sp-4);
   background: var(--bg-primary);
   border-bottom: 1px solid var(--border);
   box-shadow: var(--shadow-sm);
 }
 
 .hi-header__inner {
-  max-width: 1280px;
-  margin: 0 auto;
+  width: 100%;
+  max-width: none;
+  margin: 0;
   display: flex;
   align-items: center;
   gap: var(--sp-4);
@@ -137,8 +155,10 @@
 
 /* Error */
 .error-banner {
-  max-width: 1280px;
-  margin: var(--sp-3) auto 0;
+  box-sizing: border-box;
+  width: calc(100% - 2 * var(--hi-page-gutter-x));
+  max-width: none;
+  margin: var(--sp-3) var(--hi-page-gutter-x) 0;
   padding: var(--sp-3) var(--sp-4);
   display: flex;
   flex-wrap: wrap;
@@ -219,9 +239,11 @@
 /* Mobile tabs */
 .hi-tabs {
   display: none;
-  max-width: 1280px;
-  margin: var(--sp-3) auto 0;
-  padding: 0 var(--sp-4);
+  box-sizing: border-box;
+  width: calc(100% - 2 * var(--hi-page-gutter-x));
+  max-width: none;
+  margin: var(--sp-3) var(--hi-page-gutter-x) 0;
+  padding: 0;
   gap: var(--sp-2);
 }
 
@@ -242,16 +264,20 @@
   background: color-mix(in srgb, var(--primary) 12%, var(--bg-card));
 }
 
-/* Layout — 50:50 等分，左右高度对齐 */
+/* Layout — 50:50 等分；主区占满剩余视口，长对话仅在右侧框内滚动 */
 .hi-layout {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: var(--sp-5);
+  box-sizing: border-box;
+  width: calc(100% - 2 * var(--hi-page-gutter-x));
+  max-width: none;
+  margin: 0 var(--hi-page-gutter-x);
+  padding: var(--sp-5) 0;
   display: grid;
   grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr;
   gap: 24px;
   align-items: stretch;
-  min-height: calc(100vh - 132px);
+  min-height: 0;
+  overflow: hidden;
 }
 
 @media (max-width: 1023px) {
@@ -261,7 +287,8 @@
 
   .hi-layout[data-narrow='true'] {
     grid-template-columns: 1fr;
-    min-height: auto;
+    grid-template-rows: 1fr;
+    min-height: 0;
   }
 
   .hi-layout[data-narrow='true'][data-tab='data'] .hi-col--chat {
@@ -279,14 +306,17 @@
   gap: var(--sp-3);
   min-height: 0;
   height: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .hi-col--chat {
   min-width: 0;
-  min-height: 500px;
+  min-height: 0;
   height: 100%;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 /* Data panel */
@@ -830,7 +860,8 @@
 }
 
 .chat-msg__bubble-wrap {
-  max-width: min(100%, 720px);
+  max-width: min(100%, 960px);
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: var(--sp-1);
@@ -953,6 +984,7 @@
 
 /* Chat input */
 .chat-input {
+  flex-shrink: 0;
   border-top: 1px solid var(--border);
   padding: var(--sp-3) var(--sp-4);
   background: var(--bg-secondary);
