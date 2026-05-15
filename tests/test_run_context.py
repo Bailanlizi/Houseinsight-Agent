@@ -47,3 +47,20 @@ def test_build_initial_second_run_includes_prior(mock_llm_env: None) -> None:
     assert "用户：" in pt
     assert "助手：" in pt
     assert "先看基础统计" in pt
+
+
+def test_build_initial_clean_caps_iterations(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MAX_ITERATIONS", "10")
+    monkeypatch.setenv("MAX_CLEANING_ITERATIONS", "4")
+    from server.core.config import get_settings
+
+    get_settings.cache_clear()
+    st = build_initial_agent_state("s", "清洗", 99, None, run_phase="clean")
+    assert st["max_iterations"] == 4
+    assert st["run_phase"] == "clean"
+    st2 = build_initial_agent_state("s", "清洗", 2, None, run_phase="clean")
+    assert st2["max_iterations"] == 2
+    st3 = build_initial_agent_state("s", "分析", 99, None, run_phase="analyze")
+    assert st3["max_iterations"] == 99
+    assert st3.get("run_phase") == "analyze"
+    get_settings.cache_clear()

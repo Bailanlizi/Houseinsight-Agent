@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 
@@ -51,6 +51,8 @@ def build_initial_agent_state(
     goal: str,
     max_iterations: int,
     last_state: dict[str, Any] | None,
+    *,
+    run_phase: Literal["clean", "analyze"] = "analyze",
 ) -> AgentState:
     prior = ""
     if last_state:
@@ -60,12 +62,18 @@ def build_initial_agent_state(
                 messages_from_serializable(raw_msgs),
                 get_settings().max_prior_transcript_chars,
             )
+    s = get_settings()
+    max_it = max_iterations
+    if run_phase == "clean":
+        cap = min(s.max_cleaning_iterations, s.max_iterations)
+        max_it = min(max_iterations, cap)
     return {
         "messages": [HumanMessage(content=goal)],
         "prior_transcript": prior,
         "session_id": session_id,
         "goal": goal,
-        "max_iterations": max_iterations,
+        "run_phase": run_phase,
+        "max_iterations": max_it,
         "data_profile": {},
         "plan": [],
         "execution_history": [],

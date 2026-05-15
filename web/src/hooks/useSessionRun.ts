@@ -261,7 +261,7 @@ export function useSessionRun() {
 
     ws.onopen = () => {
       setStatus('清洗任务进行中…')
-      ws.send(JSON.stringify({ cmd: 'run', goal: CLEANING_PROMPT, max_iterations: maxIter }))
+      ws.send(JSON.stringify({ cmd: 'run', goal: CLEANING_PROMPT, max_iterations: maxIter, phase: 'clean' }))
     }
 
     attachWsHandlers(ws)
@@ -306,7 +306,9 @@ export function useSessionRun() {
 
       ws.onopen = () => {
         setStatus('分析进行中…')
-        ws.send(JSON.stringify({ cmd: 'run', goal: trimmed, max_iterations: maxIter }))
+        ws.send(
+          JSON.stringify({ cmd: 'run', goal: trimmed, max_iterations: maxIter, phase: 'analyze' }),
+        )
       }
 
       attachWsHandlers(ws, chatEpoch)

@@ -4,7 +4,7 @@ import io
 import uuid
 import asyncio
 
-from typing import Any
+from typing import Any, Literal
 
 import pandas as pd
 from fastapi import APIRouter, File, HTTPException, UploadFile
@@ -49,6 +49,7 @@ def persist_session_state(session_id: str, out: dict[str, Any]) -> None:
 
 class RunBody(BaseModel):
     goal: str = Field(default="分析这个数据集")
+    phase: Literal["clean", "analyze"] = Field(default="analyze")
     options: dict = Field(default_factory=dict)
 
 
@@ -92,7 +93,9 @@ async def run_session(session_id: str, body: RunBody) -> dict:
     s = get_settings()
     max_iter = int(body.options.get("max_iterations", s.max_iterations))
     last_state = _session_meta[session_id].get("last_state")
-    initial = build_initial_agent_state(session_id, body.goal, max_iter, last_state)
+    initial = build_initial_agent_state(
+        session_id, body.goal, max_iter, last_state, run_phase=body.phase
+    )
     out = run_agent(initial)
     fa = out.get("final_answer") or ""
     persist_session_state(session_id, out)

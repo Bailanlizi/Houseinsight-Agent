@@ -93,7 +93,7 @@
 | `plan` | List[PlanStep] | `tool_name`、`arguments`、`rationale`（可选） |
 | `plan_generation_error` | str \| null | 非 mock 下 `plan` 节点 LLM 结构化输出失败时写入；`execute` 将其记入失败记录并通常触发 `stop_reason=error` |
 | `execution_history` | List[ExecutionRecord] | 工具名、参数摘要、结果摘要、错误、耗时 |
-| `iteration` | int | 自增；硬上限默认 **15**（可配置） |
+| `iteration` | int | 自增；硬上限见环境变量 `MAX_ITERATIONS`（默认 **10**）；清洗阶段另受 `MAX_CLEANING_ITERATIONS` 与 `phase` 约束（见 §7.2） |
 | `stop_reason` | str | `max_iterations` / `completed` / `error` / `user_abort` |
 | `final_answer` | str | 最终用户可见回复 |
 | `prior_transcript` | str | **会话内多轮**：由上一轮 `messages` 格式化的节选，仅写入本轮 `initial`，供 LLM prompt；不写入 checkpoint 全表 |
@@ -161,7 +161,7 @@
 
 - `POST /sessions`  
 - `POST /sessions/{id}/upload`  
-- `POST /sessions/{id}/run` — body：`goal`, `options.max_iterations`  
+- `POST /sessions/{id}/run` — body：`goal`，可选 `phase`（`clean` | `analyze`，默认 `analyze`），`options.max_iterations`  
 - `GET /sessions/{id}/state`  
 - `DELETE /sessions/{id}` — 删除会话元数据并释放 `SessionStore` 中对应 DataFrame  
 - `GET /health`
@@ -178,9 +178,10 @@
 **客户端命令**（JSON 文本帧）：
 
 ```json
-{"cmd":"run","goal":"分析这个数据集","max_iterations":15}
+{"cmd":"run","goal":"分析这个数据集","max_iterations":10,"phase":"analyze"}
 ```
 
+- 可选 **`phase`**：`"clean"` 表示上传后**自动清洗**（服务端将 `observe` 迭代上限压至 `min(请求 max_iterations, MAX_CLEANING_ITERATIONS)`，且计划/观察提示偏向「基础画像即可」）；`"analyze"` 或省略表示**用户对话分析**（沿用 `MAX_ITERATIONS`）。前端「运行清洗」应发 `"phase":"clean"`。  
 - 须已 `POST /sessions` 且 `POST .../upload` 成功；否则推送 `event:error`。  
 - 同一会话并发第二次 `run`：在已有任务未完成时返回 `event:error`（已有任务运行中）。  
 

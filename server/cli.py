@@ -18,7 +18,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     get_session_store().put(sid, df)
     s = get_settings()
     initial: AgentState = build_initial_agent_state(
-        sid, args.goal, args.max_iterations or s.max_iterations, None
+        sid, args.goal, args.max_iterations or s.max_iterations, None, run_phase="analyze"
     )
     out = run_agent(initial)
     print(out.get("final_answer", ""))

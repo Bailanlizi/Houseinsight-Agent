@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from server.agent.graph import run_agent_streaming
@@ -59,12 +59,14 @@ async def _run_streaming_task(
     max_iterations: int,
     hub: SessionEventHub,
     loop: asyncio.AbstractEventLoop,
+    *,
+    run_phase: Literal["clean", "analyze"] = "analyze",
 ) -> None:
     lock = _ensure_run_lock(session_id)
     async with lock:
         last_state = _session_meta[session_id].get("last_state")
         initial: AgentState = build_initial_agent_state(
-            session_id, goal, max_iterations, last_state
+            session_id, goal, max_iterations, last_state, run_phase=run_phase
         )
 
         def emit(ev: dict[str, Any]) -> None:
@@ -151,7 +153,12 @@ async def session_ws(websocket: WebSocket, session_id: str) -> None:
             goal = str(msg.get("goal") or "分析这个数据集")
             s = get_settings()
             max_iter = int(msg.get("max_iterations") or s.max_iterations)
-            active_run = asyncio.create_task(_run_streaming_task(session_id, goal, max_iter, hub, loop))
+            run_phase: Literal["clean", "analyze"] = (
+                "clean" if str(msg.get("phase") or "").strip().lower() == "clean" else "analyze"
+            )
+            active_run = asyncio.create_task(
+                _run_streaming_task(session_id, goal, max_iter, hub, loop, run_phase=run_phase)
+            )
     except WebSocketDisconnect:
         pass
     finally:

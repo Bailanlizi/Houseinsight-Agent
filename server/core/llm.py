@@ -17,5 +17,6 @@ def get_chat_model() -> BaseChatModel:
         base_url=s.openai_base_url,
         model=s.openai_model,
         temperature=0.2,
-        timeout=120,
+        timeout=s.llm_timeout_seconds,
+        max_retries=s.llm_max_retries,
     )

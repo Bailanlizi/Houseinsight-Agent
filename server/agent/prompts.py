@@ -111,6 +111,31 @@ INTENT_AND_FILTER_GUIDE = """
 
 ---
 
+## remove_duplicates（格式硬约束）
+
+- `arguments` **必须**包含 **`subset`**：非空 JSON 字符串数组，每个元素须为当前摘要 `columns` 中存在的列名（常用去重键如「房源编号」「链接」等，以摘要为准）。
+- **禁止**省略 `subset` 或写成空对象 `{}`。
+
+**正例**：`{"subset":["房源编号"]}`
+
+**反例**：`{"tool":"remove_duplicates","arguments":{}}` → 错误：缺少 `subset`。
+
+---
+
+## group_by_summary（格式硬约束）
+
+- `arguments` **必须且仅能**包含三个键（名字须逐字一致）：
+  - `group_by`：分组列名（字符串）；
+  - `value`：要聚合的**数值列**列名（字符串）；
+  - `stat`：聚合方式，**仅**允许 `mean`、`median`、`sum`、`count`、`min`、`max` 之一（小写字符串）。
+- **禁止**使用 `agg`、`aggregations`、`pivot`、或把 `{"总价":"mean"}` 这类字典当作顶层字段替代 `value`/`stat`。
+
+**正例**：`{"group_by":"区域","value":"总价","stat":"mean"}`
+
+**反例**：`{"group_by":"区域","agg":{"总价":"mean"}}` → 错误：应改为 `value` + `stat`。
+
+---
+
 ## 复合列「房屋信息」
 
 若数据摘要显示存在「房屋信息」列且样例含「室」「厅」「平米」或「|」分隔，应优先规划 parse_house_info_column（arguments: {"column":"房屋信息"}），再基于 hi_室、hi_建面 等列筛选或聚合。
@@ -130,6 +155,8 @@ PLAN_PROMPT = """根据用户目标、数据摘要与执行历史，制定下一
 - `steps[].tool`：必须从「可用工具名称」列表中**原样**选择，勿拼写变体。
 - `filter_rows` → `arguments.filters[].op` **仅允许**：==、!=、<、>、<=、>=、in、contains（禁止 eq、lt 等别名）。`logic` 仅 `and` 或 `or`。
 - `search_text` → `arguments.how` **仅允许**：`any_term_any_column` 或 `all_terms_concat`。
+- `remove_duplicates` → `arguments` **必须**含非空数组 `subset`（每项为数据摘要 `columns` 中存在的列名），不得省略或给 `{{}}`。
+- `group_by_summary` → `arguments` **必须且仅能**含三个键：`group_by`（字符串）、`value`（要聚合的数值列名）、`stat`（仅 `mean`|`median`|`sum`|`count`|`min`|`max`）。**禁止**使用 `agg`、`aggregations` 或把统计写进嵌套字典代替 `stat`。
 - 策略（先解析再筛、先 search_text 再 filter 等）由你决定；上述为**字面量白名单**，违反则本步执行失败。
 
 可用工具名称：
@@ -147,6 +174,42 @@ PLAN_PROMPT = """根据用户目标、数据摘要与执行历史，制定下一
 执行历史摘要：
 {history_excerpt}
 """
+
+
+def format_plan_structure_retry_hint(previous_error: str) -> str:
+    """上一轮结构化计划校验失败时，拼在 HumanMessage 末尾供模型自我修正。"""
+    err = (previous_error or "").strip() or "（无详情）"
+    return (
+        "\n\n## 重要修正（上一轮输出未通过服务端 JSON Schema 校验）\n\n"
+        f"校验错误摘要：\n{err}\n\n"
+        "请重新输出**整份** `steps`（1～3 步），并再次核对：\n"
+        "- `remove_duplicates` → `arguments` 必须含非空 `subset` 字符串数组；\n"
+        "- `group_by_summary` → 仅允许键 `group_by`、`value`、`stat`，禁止 `agg` 等变体。\n"
+    )
+
+
+# 上传后「自动清洗」阶段：拼在计划 HumanMessage 后（不经 .format）
+CLEAN_PHASE_PLAN_APPEND = """
+---
+## 阶段说明（自动清洗，非用户自由问答）
+
+当前为 **清洗阶段**：目标是在有限轮次内建立**可对话的数据画像**，而非做穷尽式数据治理。
+
+- 优先 **1 步** `get_basic_stats`；若摘要显示「总价」等价格列仍为文本且明显带「万」等单位，可再规划 **至多 1 步** `parse_numeric_column` 作用于该列。
+- **不要**在清洗阶段规划：`remove_duplicates`、`filter_outliers`、多列批量 `fill_missing`、`group_by_summary`、`top_k_values`、`search_text` 等（除非用户清洗文案中明确要求且单步可完成）；深度清洗留到**后续用户提问**再按需调用。
+- `filter_outliers` 若确需使用：`arguments` **必须**含单个字符串字段 `column`（单列名），**禁止**使用 `columns` 数组代替。
+"""
+
+# 清洗阶段：拼在 observe 的 HumanMessage 末尾
+CLEAN_PHASE_OBSERVE_APPEND = """
+---
+## 阶段说明（自动清洗）
+
+这是上传后的**自动清洗**阶段：若已具备**基础统计摘要**（`get_basic_stats` 成功），且价格类文本列在需要时已尝试解析，你应倾向 **`should_finish: true`**，不要为了「完美清洗」继续要求多轮重型工具。
+
+后续用户会在**对话分析**阶段提出具体问题，届时再按需规划更多工具即可。
+"""
+
 
 OBSERVE_PROMPT = """根据最近一次工具执行结果与用户目标，判断是否应结束分析循环。
 若用户明确要求了筛选条件（地铁、户型、人数、区域、预算）但执行历史中尚未出现成功的 filter_rows / search_text / search_listings / 相应解析步骤，一般应继续规划（should_finish=false）。

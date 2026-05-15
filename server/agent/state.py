@@ -22,11 +22,16 @@ class ExecutionRecord(TypedDict, total=False):
     duration_ms: float
 
 
+RunPhase = Literal["clean", "analyze"]
+
+
 class AgentState(TypedDict, total=False):
     messages: Annotated[Sequence[BaseMessage], add_messages]
     prior_transcript: str  # 上一轮及更早对话的节选（仅 initial 写入，供 prompt）
     session_id: str
     goal: str
+    # 上传后自动清洗为 clean；用户对话分析为 analyze（默认）
+    run_phase: RunPhase
     max_iterations: int
     data_profile: dict[str, Any]
     plan: list[PlanStepDict]
