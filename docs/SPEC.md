@@ -182,6 +182,7 @@
 ```
 
 - 可选 **`phase`**：`"clean"` 表示上传后**自动清洗**（服务端将 `observe` 迭代上限压至 `min(请求 max_iterations, MAX_CLEANING_ITERATIONS)`，且计划/观察提示偏向「基础画像即可」）；`"analyze"` 或省略表示**用户对话分析**（沿用 `MAX_ITERATIONS`）。前端「运行清洗」应发 `"phase":"clean"`。  
+- **分析阶段**（`phase=analyze`）另受同类工具重复上限（环境变量 `MAX_SEARCH_TEXT_PER_RUN`、`MAX_GET_BASIC_STATS_PER_RUN`、`MAX_FILTER_ROWS_PER_RUN`）；`search_text` 成功后 observe 倾向 `should_finish=true`。
 - 须已 `POST /sessions` 且 `POST .../upload` 成功；否则推送 `event:error`。  
 - 同一会话并发第二次 `run`：在已有任务未完成时返回 `event:error`（已有任务运行中）。  
 

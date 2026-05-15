@@ -13,6 +13,8 @@ from pydantic import BaseModel
 from server.agent.plan_schema import PlanStructuredOutput, plan_steps_to_plan_dicts
 from server.agent.prompts import (
     ANSWER_PROMPT,
+    ANALYZE_PHASE_OBSERVE_APPEND,
+    ANALYZE_PHASE_PLAN_APPEND,
     CLEAN_PHASE_OBSERVE_APPEND,
     CLEAN_PHASE_PLAN_APPEND,
     INTENT_AND_FILTER_GUIDE,
@@ -70,6 +72,100 @@ def _prior_for_prompt(state: AgentState) -> str:
 def _use_mock_llm() -> bool:
     s = get_settings()
     return s.hi_mock_llm or not s.llm_configured
+
+
+def _is_analyze_phase(state: AgentState) -> bool:
+    return state.get("run_phase", "analyze") != "clean"
+
+
+def _tool_ok_count(hist: list[ExecutionRecord], tool: str) -> int:
+    return sum(1 for h in hist if h.get("tool") == tool and h.get("ok"))
+
+
+def _analyze_tool_repeat_cap(tool: str) -> int | None:
+    """分析阶段单 run 内某工具成功次数上限；None 表示不限制。"""
+    s = get_settings()
+    caps = {
+        "search_text": s.max_search_text_per_run,
+        "get_basic_stats": s.max_get_basic_stats_per_run,
+        "filter_rows": s.max_filter_rows_per_run,
+    }
+    if tool not in caps:
+        return None
+    return int(caps[tool])
+
+
+def _analyze_tool_at_cap(state: AgentState, tool: str) -> bool:
+    if not _is_analyze_phase(state):
+        return False
+    cap = _analyze_tool_repeat_cap(tool)
+    if cap is None:
+        return False
+    hist = state.get("execution_history") or []
+    return _tool_ok_count(hist, tool) >= cap
+
+
+def _filter_plan_steps_for_analyze_caps(
+    state: AgentState, steps: list[PlanStepDict]
+) -> list[PlanStepDict]:
+    if not _is_analyze_phase(state):
+        return steps
+    hist = state.get("execution_history") or []
+    pending: dict[str, int] = {}
+    out: list[PlanStepDict] = []
+    for step in steps:
+        tool = str(step.get("tool") or "")
+        cap = _analyze_tool_repeat_cap(tool)
+        if cap is not None:
+            used = _tool_ok_count(hist, tool) + pending.get(tool, 0)
+            if used >= cap:
+                continue
+            pending[tool] = pending.get(tool, 0) + 1
+        out.append(step)
+    return out
+
+
+def _analyze_should_finish_after_tool(state: AgentState, last: dict[str, Any] | None) -> bool:
+    """分析阶段：关键工具成功后倾向结束，避免重复 search_text 等。"""
+    if not _is_analyze_phase(state) or not isinstance(last, dict) or not last.get("ok"):
+        return False
+    tool = last.get("tool")
+    if tool == "search_text":
+        return True
+    if tool == "group_by_summary":
+        return not _must_continue_for_price_pipeline(state)
+    hist = state.get("execution_history") or []
+    if tool == "filter_rows" and _tool_ok_count(hist, "search_text") >= 1:
+        return True
+    if tool == "get_basic_stats" and _tool_ok_count(hist, "get_basic_stats") >= 1:
+        if any(h.get("tool") == "group_by_summary" and h.get("ok") for h in hist):
+            return True
+        if any(h.get("tool") == "filter_rows" and h.get("ok") for h in hist):
+            return True
+    return False
+
+
+def _apply_analyze_observe_overrides(state: AgentState, obs: dict[str, Any]) -> dict[str, Any]:
+    """分析阶段护栏：在 LLM/mock observe 结果上强制早停条件。"""
+    if not _is_analyze_phase(state):
+        return obs
+    hist = state.get("execution_history") or []
+    last = hist[-1] if hist else {}
+    if _must_continue_for_price_pipeline(state):
+        if obs.get("should_finish"):
+            return {
+                "should_finish": False,
+                "stop_reason": "completed",
+                "notes": "用户含价格数值条件，总价列尚未解析为数值，应继续 parse_numeric_column 再筛选。",
+            }
+        return obs
+    if _analyze_should_finish_after_tool(state, last if isinstance(last, dict) else None):
+        return {
+            "should_finish": True,
+            "stop_reason": "completed",
+            "notes": obs.get("notes") or "分析阶段：已有足够工具结果，进入结论生成。",
+        }
+    return obs
 
 
 def explore_node(state: AgentState, config: RunnableConfig) -> dict[str, Any]:
@@ -217,6 +313,8 @@ def _mock_plan_soft_search(state: AgentState) -> PlanStepDict | None:
     hist = state.get("execution_history", [])
     if any(h.get("tool") == "search_text" for h in hist):
         return None
+    if _analyze_tool_at_cap(state, "search_text"):
+        return None
     terms = _terms_from_goal(str(state.get("goal", "") or ""))
     if not terms:
         return None
@@ -295,6 +393,8 @@ def _llm_plan(state: AgentState) -> tuple[list[PlanStepDict], str | None]:
     )
     if state.get("run_phase") == "clean":
         base_human += CLEAN_PHASE_PLAN_APPEND
+    elif _is_analyze_phase(state):
+        base_human += ANALYZE_PHASE_PLAN_APPEND
     model = get_chat_model()
     structured = model.with_structured_output(PlanStructuredOutput)
     last_err = ""
@@ -308,6 +408,7 @@ def _llm_plan(state: AgentState) -> tuple[list[PlanStepDict], str | None]:
                 ]
             )
             steps = plan_steps_to_plan_dicts(list(out.steps))[:3]
+            steps = _filter_plan_steps_for_analyze_caps(state, steps)
             if steps:
                 return steps, None
             last_err = "模型返回了空的 steps（steps 数组长度为 0）"
@@ -326,11 +427,11 @@ def plan_node(state: AgentState, config: RunnableConfig) -> dict[str, Any]:
         if state.get("stop_reason") == "error" and not state.get("data_profile"):
             return {"plan": [], "plan_generation_error": None}
         if _use_mock_llm():
-            steps = _mock_plan(state)
+            steps = _filter_plan_steps_for_analyze_caps(state, _mock_plan(state))
             return {"plan": steps, "plan_generation_error": None}
         steps, err = _llm_plan(state)
         if err or not steps:
-            fallback = _mock_plan(state)
+            fallback = _filter_plan_steps_for_analyze_caps(state, _mock_plan(state))
             if fallback:
                 _log_hi_timing(
                     "plan_degraded=mock",
@@ -526,6 +627,8 @@ def _llm_observe(state: AgentState) -> dict[str, Any]:
     )
     if state.get("run_phase") == "clean":
         prompt += CLEAN_PHASE_OBSERVE_APPEND
+    elif _is_analyze_phase(state):
+        prompt += ANALYZE_PHASE_OBSERVE_APPEND
     model = get_chat_model()
     structured = model.with_structured_output(ObserveLLMOutput)
     try:
@@ -565,6 +668,7 @@ def observe_node(state: AgentState, config: RunnableConfig) -> dict[str, Any]:
             obs = _mock_observe(state)
         else:
             obs = _llm_observe(state)
+        obs = _apply_analyze_observe_overrides(state, obs)
         updates.update(obs)
         if obs.get("notes"):
             updates.setdefault("messages", [])

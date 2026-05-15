@@ -210,6 +210,27 @@ CLEAN_PHASE_OBSERVE_APPEND = """
 后续用户会在**对话分析**阶段提出具体问题，届时再按需规划更多工具即可。
 """
 
+# 对话分析阶段：拼在 plan / observe 的 HumanMessage 后（不经 .format）
+ANALYZE_PHASE_PLAN_APPEND = """
+---
+## 阶段说明（用户对话分析）
+
+当前为 **分析阶段**（非上传后自动清洗）：在能回答用户问题的前提下**尽量少步、勿重复同类工具**。
+
+- 每种工具在同一次 run 内成功执行次数有上限（服务端会丢弃超额步骤）：`search_text` 通常 **至多 1 次**；`get_basic_stats` **至多 1 次**；`filter_rows` 至多若干次。不要为微调关键词反复规划 `search_text`。
+- 用户问区域房价/均价：在总价已数值化后，优先 `group_by_summary`（`group_by`+`value`+`stat`），勿重复 `get_basic_stats`。
+- 非结构化卖点（采光、地铁等）：规划 **一次** `search_text`（多列、多词 OR）即可；与 `filter_rows` 硬条件可组合，但勿连续多轮 `search_text`。
+"""
+
+ANALYZE_PHASE_OBSERVE_APPEND = """
+---
+## 阶段说明（用户对话分析）
+
+若 **`search_text` 已成功**且预览中已有匹配行（或已结合 `filter_rows` 得到可引用预览），你应倾向 **`should_finish: true`**，由 answer 节点综合 execution_history 作答，**不要**再要求重复 `search_text` 或仅为「再试几个同义词」而继续循环。
+
+若已成功 `group_by_summary` 或 `filter_rows` 且足以回答用户概括性问题，也可结束。
+"""
+
 
 OBSERVE_PROMPT = """根据最近一次工具执行结果与用户目标，判断是否应结束分析循环。
 若用户明确要求了筛选条件（地铁、户型、人数、区域、预算）但执行历史中尚未出现成功的 filter_rows / search_text / search_listings / 相应解析步骤，一般应继续规划（should_finish=false）。

@@ -26,6 +26,21 @@ class Settings(BaseSettings):
         ge=1,
         validation_alias="MAX_CLEANING_ITERATIONS",
     )
+    max_search_text_per_run: int = Field(
+        default=1,
+        ge=0,
+        validation_alias="MAX_SEARCH_TEXT_PER_RUN",
+    )
+    max_get_basic_stats_per_run: int = Field(
+        default=1,
+        ge=0,
+        validation_alias="MAX_GET_BASIC_STATS_PER_RUN",
+    )
+    max_filter_rows_per_run: int = Field(
+        default=3,
+        ge=0,
+        validation_alias="MAX_FILTER_ROWS_PER_RUN",
+    )
     llm_timeout_seconds: float = Field(
         default=60.0,
         ge=10.0,
