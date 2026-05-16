@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from server.agent.plan_schema import PlanStructuredOutput, plan_steps_to_plan_dicts
 from server.agent.prompts import (
     ANSWER_PROMPT,
+    ANSWER_SYSTEM_ZH,
     ANALYZE_PHASE_OBSERVE_APPEND,
     ANALYZE_PHASE_PLAN_APPEND,
     CLEAN_PHASE_OBSERVE_APPEND,
@@ -25,13 +26,71 @@ from server.agent.prompts import (
 )
 from server.agent.state import AgentState, ExecutionRecord, PlanStepDict
 from server.core.config import get_settings
-from server.core.llm import get_chat_model
+from server.core.llm import get_answer_chat_model, get_chat_model
 from server.core.session_store import get_session_store
 from server.tools._dataframe import ensure_row_fingerprint
 from server.tools.explore_tools import get_data_profile
 from server.tools.register import TOOL_REGISTRY, dispatch_tool
 
 logger = logging.getLogger(__name__)
+
+ANSWER_FALLBACK_ILLEGAL = (
+    "抱歉，本次回复格式不符合展示要求，未能正常呈现。"
+    "请换一种问法再试，或补充区域、预算、户型等条件，我会基于表格数据重新为您分析。"
+)
+ANSWER_FALLBACK_QUERY_ISSUE = (
+    "抱歉，按您当前的条件查询数据时遇到问题，暂时无法给出可靠结论或推荐。"
+    "建议您检查上传的表格是否包含相关列（如区域、描述、总价等），"
+    "或换一种说法（例如先限定区域，再说明采光、地铁等偏好）后重新提问。"
+)
+
+_ANSWER_TECH_TERM_RE = re.compile(
+    r"\b(?:search_text|filter_rows|search_listings|parse_numeric_column|"
+    r"parse_house_info_column|get_basic_stats|get_data_profile|group_by_summary|"
+    r"remove_duplicates|filter_outliers|fill_missing|top_k_values|"
+    r"correlation_analysis|compare_cleaning_results|execution_history|arguments|"
+    r"should_finish|stop_reason)\b",
+    re.IGNORECASE,
+)
+
+
+def _answer_looks_illegal(text: str) -> bool:
+    """检测面向用户的回答是否泄漏 JSON 计划或内部术语。"""
+    s = (text or "").strip()
+    if not s:
+        return True
+    if _ANSWER_TECH_TERM_RE.search(s):
+        return True
+    if re.search(r'^\s*[\[{]', s) or re.search(r'"\s*tool\s*"\s*:', s):
+        return True
+    try:
+        parsed = json.loads(s)
+    except (json.JSONDecodeError, TypeError):
+        parsed = None
+    if isinstance(parsed, dict) and ("steps" in parsed or "tool" in parsed):
+        return True
+    if isinstance(parsed, list) and parsed and all(isinstance(x, dict) for x in parsed):
+        if any("tool" in x for x in parsed):
+            return True
+    return False
+
+
+def _sanitize_answer(text: str) -> str:
+    if _answer_looks_illegal(text):
+        return ANSWER_FALLBACK_ILLEGAL
+    return text
+
+
+def _execution_had_tool_failure(history: list[ExecutionRecord]) -> bool:
+    return any(isinstance(h, dict) and h.get("ok") is False for h in history)
+
+
+def _friendly_answer_on_tool_failure(state: AgentState) -> dict[str, Any] | None:
+    hist = state.get("execution_history") or []
+    if not _execution_had_tool_failure(hist):
+        return None
+    fa = ANSWER_FALLBACK_QUERY_ISSUE
+    return {"final_answer": fa, "messages": [AIMessage(content=fa)]}
 
 
 def _log_hi_timing(kind: str, **fields: Any) -> None:
@@ -691,6 +750,10 @@ def answer_node(state: AgentState, config: RunnableConfig) -> dict[str, Any]:
     t0 = time.perf_counter()
     sid = state.get("session_id", "")
     try:
+        tool_fail = _friendly_answer_on_tool_failure(state)
+        if tool_fail is not None:
+            return tool_fail
+
         if _use_mock_llm():
             prof = state.get("data_profile", {})
             n = prof.get("n_rows", "未知")
@@ -698,15 +761,10 @@ def answer_node(state: AgentState, config: RunnableConfig) -> dict[str, Any]:
             lines = [
                 "## 分析结论（mock 模式）",
                 f"- 数据行数：**{n}**",
-                f"- 停止原因：**{sr}**",
-                "- 已执行工具摘要见会话状态 `execution_history`。",
+                f"- 分析状态：**{'已完成' if sr == 'completed' else '未完全完成'}**",
             ]
             if sr == "error":
-                err_hint = ""
-                hist = state.get("execution_history") or []
-                if hist and isinstance(hist[-1], dict) and hist[-1].get("error"):
-                    err_hint = f"\n- 最近错误：**{hist[-1].get('error')}**"
-                lines.append(err_hint or "\n- 最近一步执行失败，请查看 `execution_history` 中的 error。")
+                lines.append("- 数据查询过程中遇到问题，请调整条件后重试。")
             text = "\n".join(lines)
             return {"final_answer": text, "messages": [AIMessage(content=text)]}
 
@@ -716,21 +774,24 @@ def answer_node(state: AgentState, config: RunnableConfig) -> dict[str, Any]:
             profile_excerpt=_profile_excerpt(state.get("data_profile", {})),
             history_excerpt=_history_excerpt(state.get("execution_history", [])),
         )
-        model = get_chat_model()
+        model = get_answer_chat_model()
         try:
-            resp = model.invoke([SystemMessage(content=SYSTEM_ZH), HumanMessage(content=prompt)])
+            resp = model.invoke(
+                [SystemMessage(content=ANSWER_SYSTEM_ZH), HumanMessage(content=prompt)]
+            )
             text = getattr(resp, "content", str(resp))
-            fa = str(text)
+            fa = _sanitize_answer(str(text))
+            if fa != str(text):
+                logger.warning("answer output sanitized (illegal JSON or tech terms)")
             return {"final_answer": fa, "messages": [AIMessage(content=fa)]}
         except Exception as e:  # noqa: BLE001
             logger.warning("answer LLM failed, fallback to summary: %s", e)
             prof = state.get("data_profile", {}) or {}
             n = prof.get("n_rows", "未知")
             lines = [
-                "## 分析结论（模型不可用时的摘要）",
-                f"- 数据行数：**{n}**",
-                f"- 停止原因：**{state.get('stop_reason', '') or 'completed'}**",
-                "- 已执行工具见 `execution_history`；若需完整结论请检查 API Key 与网络后重试。",
+                "## 分析结论（模型暂不可用）",
+                f"- 当前表格约 **{n}** 条记录。",
+                "- 暂时无法生成完整文字结论，请检查 API Key 与网络后重试。",
             ]
             fa = "\n".join(lines)
             return {"final_answer": fa, "messages": [AIMessage(content=fa)]}

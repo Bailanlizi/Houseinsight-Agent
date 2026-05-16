@@ -19,6 +19,12 @@ class Settings(BaseSettings):
         validation_alias="OPENAI_BASE_URL",
     )
     openai_model: str = Field(default="qwen-turbo", validation_alias="OPENAI_MODEL")
+    answer_llm_temperature: float = Field(
+        default=0.2,
+        ge=0.0,
+        le=1.0,
+        validation_alias="ANSWER_LLM_TEMPERATURE",
+    )
 
     max_iterations: int = Field(default=10, ge=1, validation_alias="MAX_ITERATIONS")
     max_cleaning_iterations: int = Field(
