@@ -182,7 +182,7 @@
 ```
 
 - 可选 **`phase`**：`"clean"` 表示上传后**自动清洗**（服务端将 `observe` 迭代上限压至 `min(请求 max_iterations, MAX_CLEANING_ITERATIONS)`，且计划/观察提示偏向「基础画像即可」）；`"analyze"` 或省略表示**用户对话分析**（沿用 `MAX_ITERATIONS`）。前端「运行清洗」应发 `"phase":"clean"`。  
-- **分析阶段**（`phase=analyze`）另受同类工具重复上限（环境变量 `MAX_SEARCH_TEXT_PER_RUN`、`MAX_GET_BASIC_STATS_PER_RUN`、`MAX_FILTER_ROWS_PER_RUN`）；`search_text` 成功后 observe 倾向 `should_finish=true`。
+- **分析阶段**（`phase=analyze`）另受同类工具重复上限（环境变量 `MAX_SEARCH_TEXT_PER_RUN`、`MAX_GET_BASIC_STATS_PER_RUN`、`MAX_FILTER_ROWS_PER_RUN`）。默认启用 **规则 observe**（`ANALYZE_RULE_OBSERVE_ENABLED=1`）：先按用户意图与 `execution_history` 确定性判断是否 `should_finish`，仅不确定时再调用 observe LLM；`plan` 一次可含至多 3 步，服务端在 `execute` 间**连续消费 plan 队列**（上一步成功则跳过中间 observe/plan LLM）。仅硬条件筛选（区域/预算等、无地铁采光类卖点）时，一次成功 `filter_rows` 即可结束；`search_text` 成功后亦倾向结束。
 - 须已 `POST /sessions` 且 `POST .../upload` 成功；否则推送 `event:error`。  
 - 同一会话并发第二次 `run`：在已有任务未完成时返回 `event:error`（已有任务运行中）。  
 

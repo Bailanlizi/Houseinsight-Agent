@@ -60,6 +60,10 @@ class Settings(BaseSettings):
         validation_alias="LLM_MAX_RETRIES",
     )
     hi_mock_llm: bool = Field(default=False, validation_alias="HI_MOCK_LLM")
+    analyze_rule_observe_enabled: bool = Field(
+        default=True,
+        validation_alias="ANALYZE_RULE_OBSERVE_ENABLED",
+    )
     log_llm_io: bool = Field(default=False, validation_alias="LOG_LLM_IO")
 
     max_upload_bytes: int = Field(default=10 * 1024 * 1024, validation_alias="MAX_UPLOAD_BYTES")

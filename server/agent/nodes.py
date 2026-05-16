@@ -184,24 +184,269 @@ def _filter_plan_steps_for_analyze_caps(
     return out
 
 
+def _goal_needs_soft_search(goal: str) -> bool:
+    return bool(_terms_from_goal(goal))
+
+
+def _goal_needs_aggregate(goal: str) -> bool:
+    g = (goal or "").strip()
+    if not g:
+        return False
+    return any(
+        k in g
+        for k in (
+            "均价",
+            "房价",
+            "各区域",
+            "分区",
+            "按区",
+            "区域价",
+            "每平米",
+            "单价",
+            "统计",
+            "分布",
+        )
+    )
+
+
+def _goal_needs_structured_filter(goal: str) -> bool:
+    g = (goal or "").strip()
+    if not g:
+        return False
+    if _goal_implies_numeric_price_intent(g):
+        return True
+    return any(
+        k in g
+        for k in (
+            "区域",
+            "区",
+            "户型",
+            "室",
+            "厅",
+            "卫",
+            "面积",
+            "建面",
+            "预算",
+            "万人",
+            "万以内",
+            "万以下",
+            "推荐",
+            "筛选",
+            "符合条件的",
+        )
+    )
+
+
+def _goal_needs_overview_stats(goal: str) -> bool:
+    """用户明确只要数据概览/分布时，get_basic_stats 即可作答。"""
+    if _goal_needs_soft_search(goal) or _goal_needs_aggregate(goal):
+        return False
+    if _goal_needs_structured_filter(goal):
+        return False
+    g = (goal or "").strip()
+    if not g:
+        return False
+    return any(
+        k in g
+        for k in (
+            "概览",
+            "基本情况",
+            "总体",
+            "概况",
+            "数据画像",
+            "分布情况",
+            "有多少条",
+            "多少条记录",
+            "行数",
+        )
+    )
+
+
+def _tool_succeeded(hist: list[ExecutionRecord], tool: str) -> bool:
+    return _tool_ok_count(hist, tool) >= 1
+
+
+def _record_has_preview(rec: dict[str, Any]) -> bool:
+    summary = rec.get("summary")
+    if not isinstance(summary, dict):
+        return False
+    preview = summary.get("rows_preview")
+    if isinstance(preview, list) and len(preview) > 0:
+        return True
+    matched = summary.get("matched_rows")
+    return matched is not None and int(matched) >= 0
+
+
+def _hist_has_tool_with_preview(hist: list[ExecutionRecord], tool: str) -> bool:
+    for h in hist:
+        if h.get("tool") == tool and h.get("ok") and _record_has_preview(h):
+            return True
+    return _tool_succeeded(hist, tool) and tool in ("group_by_summary", "get_basic_stats")
+
+
+def _analyze_numeric_price_ready(state: AgentState) -> bool:
+    if _must_continue_for_price_pipeline(state):
+        return False
+    cols, prof = _columns_and_profile(state)
+    price_like = _price_like_column(cols)
+    if not price_like:
+        return True
+    dtypes = prof.get("dtypes", {}) or {}
+    if dtypes.get(price_like) in ("float64", "int64", "Int64"):
+        return True
+    hist = state.get("execution_history") or []
+    return _parse_succeeded_for_column(hist, price_like)
+
+
+def _analyze_data_sufficient_for_goal(state: AgentState) -> bool:
+    """分析阶段：执行历史是否已足以进入 answer（确定性判断）。"""
+    if not _is_analyze_phase(state):
+        return False
+    if _must_continue_for_price_pipeline(state):
+        return False
+    goal = str(state.get("goal", "") or "")
+    hist = state.get("execution_history") or []
+    if not hist:
+        return False
+
+    checks: list[bool] = []
+    if _goal_needs_soft_search(goal):
+        checks.append(_tool_succeeded(hist, "search_text"))
+    if _goal_implies_numeric_price_intent(goal):
+        checks.append(_analyze_numeric_price_ready(state))
+        checks.append(
+            _tool_succeeded(hist, "filter_rows") or _tool_succeeded(hist, "group_by_summary")
+        )
+    elif _goal_needs_aggregate(goal):
+        checks.append(
+            _tool_succeeded(hist, "group_by_summary")
+            or _hist_has_tool_with_preview(hist, "filter_rows")
+        )
+    elif _goal_needs_structured_filter(goal):
+        checks.append(_hist_has_tool_with_preview(hist, "filter_rows"))
+    elif _goal_needs_overview_stats(goal):
+        checks.append(_tool_succeeded(hist, "get_basic_stats"))
+    else:
+        return False
+
+    return bool(checks) and all(checks)
+
+
+def _analyze_required_capped_tools(state: AgentState) -> list[str]:
+    """本目标可能依赖、且受 per-run 上限约束的工具。"""
+    goal = str(state.get("goal", "") or "")
+    tools: list[str] = []
+    if _goal_needs_soft_search(goal):
+        tools.append("search_text")
+    if _goal_needs_structured_filter(goal) or _goal_implies_numeric_price_intent(goal):
+        tools.append("filter_rows")
+    if _goal_needs_overview_stats(goal) or _goal_needs_aggregate(goal):
+        tools.append("get_basic_stats")
+    return list(dict.fromkeys(tools))
+
+
+def _analyze_all_required_tools_at_cap(state: AgentState) -> bool:
+    required = _analyze_required_capped_tools(state)
+    if not required:
+        return False
+    return all(_analyze_tool_at_cap(state, t) for t in required)
+
+
 def _analyze_should_finish_after_tool(state: AgentState, last: dict[str, Any] | None) -> bool:
     """分析阶段：关键工具成功后倾向结束，避免重复 search_text 等。"""
     if not _is_analyze_phase(state) or not isinstance(last, dict) or not last.get("ok"):
         return False
+    goal = str(state.get("goal", "") or "")
     tool = last.get("tool")
     if tool == "search_text":
         return True
     if tool == "group_by_summary":
-        return not _must_continue_for_price_pipeline(state)
+        if _must_continue_for_price_pipeline(state):
+            return False
+        return _goal_needs_aggregate(goal) or not _goal_needs_soft_search(goal)
     hist = state.get("execution_history") or []
-    if tool == "filter_rows" and _tool_ok_count(hist, "search_text") >= 1:
-        return True
+    if tool == "filter_rows":
+        if _tool_ok_count(hist, "search_text") >= 1:
+            return True
+        if not _goal_needs_soft_search(goal):
+            return True
     if tool == "get_basic_stats" and _tool_ok_count(hist, "get_basic_stats") >= 1:
         if any(h.get("tool") == "group_by_summary" and h.get("ok") for h in hist):
             return True
         if any(h.get("tool") == "filter_rows" and h.get("ok") for h in hist):
             return True
+        if _goal_needs_overview_stats(goal) and not _goal_needs_soft_search(goal):
+            return True
     return False
+
+
+def _rule_observe_analyze(state: AgentState) -> dict[str, Any] | None:
+    """分析阶段规则 observe；返回 None 表示需 LLM observe。"""
+    hist = state.get("execution_history") or []
+    last = hist[-1] if hist else {}
+    plan = list(state.get("plan") or [])
+
+    if _must_continue_for_price_pipeline(state):
+        return {
+            "should_finish": False,
+            "stop_reason": "completed",
+            "notes": "用户含价格数值条件，总价列尚未解析为数值，应继续 parse_numeric_column 再筛选。",
+        }
+
+    if isinstance(last, dict) and last.get("ok") is False:
+        return {
+            "should_finish": True,
+            "stop_reason": "error",
+            "notes": "工具执行失败，结束分析循环。",
+        }
+
+    if not hist:
+        return None
+
+    if plan:
+        return {
+            "should_finish": False,
+            "stop_reason": "completed",
+            "notes": "继续执行计划队列中的后续步骤。",
+        }
+
+    if _analyze_data_sufficient_for_goal(state):
+        return {
+            "should_finish": True,
+            "stop_reason": "completed",
+            "notes": "分析阶段：数据已满足用户目标，进入结论生成。",
+        }
+
+    if _analyze_should_finish_after_tool(state, last if isinstance(last, dict) else None):
+        return {
+            "should_finish": True,
+            "stop_reason": "completed",
+            "notes": "分析阶段：关键工具已成功，进入结论生成。",
+        }
+
+    if isinstance(last, dict) and last.get("ok") and _analyze_all_required_tools_at_cap(state):
+        return {
+            "should_finish": True,
+            "stop_reason": "completed",
+            "notes": "分析阶段：相关工具已达本轮上限，进入结论生成。",
+        }
+
+    return None
+
+
+def _resolve_observe(state: AgentState) -> tuple[dict[str, Any], str]:
+    """返回 (observe 结果, observe_source=rule|llm|mock)。"""
+    s = get_settings()
+    if _is_analyze_phase(state) and s.analyze_rule_observe_enabled:
+        obs = _rule_observe_analyze(state)
+        if obs is not None:
+            return obs, "rule"
+        if _use_mock_llm():
+            return _mock_observe(state), "mock"
+        return _llm_observe(state), "llm"
+    if _use_mock_llm():
+        return _mock_observe(state), "mock"
+    return _llm_observe(state), "llm"
 
 
 def _apply_analyze_observe_overrides(state: AgentState, obs: dict[str, Any]) -> dict[str, Any]:
@@ -485,6 +730,9 @@ def plan_node(state: AgentState, config: RunnableConfig) -> dict[str, Any]:
     try:
         if state.get("stop_reason") == "error" and not state.get("data_profile"):
             return {"plan": [], "plan_generation_error": None}
+        remaining = _filter_plan_steps_for_analyze_caps(state, list(state.get("plan") or []))
+        if _is_analyze_phase(state) and remaining:
+            return {"plan": remaining, "plan_generation_error": None}
         if _use_mock_llm():
             steps = _filter_plan_steps_for_analyze_caps(state, _mock_plan(state))
             return {"plan": steps, "plan_generation_error": None}
@@ -717,18 +965,17 @@ def observe_node(state: AgentState, config: RunnableConfig) -> dict[str, Any]:
     max_iter = int(state.get("max_iterations") or get_settings().max_iterations)
     it = int(state.get("iteration", 0)) + 1
     updates: dict[str, Any] = {"iteration": it}
+    observe_source = ""
     try:
         if it >= max_iter:
             updates["should_finish"] = True
             updates["stop_reason"] = "max_iterations"
             updates["messages"] = [AIMessage(content=f"已达最大循环次数 {max_iter}（observe 计数）。")]
             return updates
-        if _use_mock_llm():
-            obs = _mock_observe(state)
-        else:
-            obs = _llm_observe(state)
+        obs, observe_source = _resolve_observe(state)
         obs = _apply_analyze_observe_overrides(state, obs)
         updates.update(obs)
+        updates["observe_source"] = observe_source
         if obs.get("notes"):
             updates.setdefault("messages", [])
             if isinstance(updates["messages"], list):
@@ -741,6 +988,7 @@ def observe_node(state: AgentState, config: RunnableConfig) -> dict[str, Any]:
             iteration=it,
             should_finish=updates.get("should_finish"),
             stop_reason=updates.get("stop_reason", ""),
+            observe_source=updates.get("observe_source", ""),
             duration_ms=f"{(time.perf_counter() - t0) * 1000:.1f}",
         )
 
@@ -803,6 +1051,18 @@ def route_after_explore(state: AgentState) -> Literal["plan", "answer"]:
     if state.get("stop_reason") == "error":
         return "answer"
     return "plan"
+
+
+def route_after_execute(state: AgentState) -> Literal["execute", "observe"]:
+    """plan 队列未消费完且上一步成功时，跳过 observe/plan LLM 继续执行。"""
+    plan = list(state.get("plan") or [])
+    if not plan:
+        return "observe"
+    hist = state.get("execution_history") or []
+    last = hist[-1] if hist else {}
+    if isinstance(last, dict) and last.get("ok") is False:
+        return "observe"
+    return "execute"
 
 
 def route_after_observe(state: AgentState) -> Literal["plan", "answer"]:

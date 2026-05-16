@@ -217,7 +217,8 @@ ANALYZE_PHASE_PLAN_APPEND = """
 
 当前为 **分析阶段**（非上传后自动清洗）：在能回答用户问题的前提下**尽量少步、勿重复同类工具**。
 
-- 每种工具在同一次 run 内成功执行次数有上限（服务端会丢弃超额步骤）：`search_text` 通常 **至多 1 次**；`get_basic_stats` **至多 1 次**；`filter_rows` 至多若干次。不要为微调关键词反复规划 `search_text`。
+- 一次 plan 可输出 **至多 3 步**；服务端会**连续执行**队列中的步骤后再进入观察，请把依赖步骤写在同一次 `steps` 里（如先 `parse_numeric_column` 再 `filter_rows`），勿为同一条件拆成多轮 plan。
+- 每种工具在同一次 run 内成功执行次数有上限（服务端会丢弃超额步骤）：`search_text` 通常 **至多 1 次**；`get_basic_stats` **至多 1 次**；`filter_rows` 至多若干次。不要为微调关键词反复规划 `search_text` 或重复 `filter_rows`。
 - 用户问区域房价/均价：在总价已数值化后，优先 `group_by_summary`（`group_by`+`value`+`stat`），勿重复 `get_basic_stats`。
 - 非结构化卖点（采光、地铁等）：规划 **一次** `search_text`（多列、多词 OR）即可；与 `filter_rows` 硬条件可组合，但勿连续多轮 `search_text`。
 """
@@ -227,6 +228,8 @@ ANALYZE_PHASE_OBSERVE_APPEND = """
 ## 阶段说明（用户对话分析）
 
 若 **`search_text` 已成功**且预览中已有匹配行（或已结合 `filter_rows` 得到可引用预览），你应倾向 **`should_finish: true`**，由 answer 节点综合 execution_history 作答，**不要**再要求重复 `search_text` 或仅为「再试几个同义词」而继续循环。
+
+若用户**仅**要区域/户型/预算等硬条件筛选（未要求地铁、采光等文案卖点），**一次成功的 `filter_rows` 即可 `should_finish: true`**，无需再 `search_text`。
 
 若已成功 `group_by_summary` 或 `filter_rows` 且足以回答用户概括性问题，也可结束。
 """

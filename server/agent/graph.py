@@ -10,6 +10,7 @@ from server.agent.nodes import (
     explore_node,
     observe_node,
     plan_node,
+    route_after_execute,
     route_after_explore,
     route_after_observe,
 )
@@ -31,7 +32,11 @@ def build_agent_graph() -> StateGraph:
         {"plan": "plan", "answer": "answer"},
     )
     g.add_edge("plan", "execute")
-    g.add_edge("execute", "observe")
+    g.add_conditional_edges(
+        "execute",
+        route_after_execute,
+        {"execute": "execute", "observe": "observe"},
+    )
     g.add_conditional_edges(
         "observe",
         route_after_observe,
