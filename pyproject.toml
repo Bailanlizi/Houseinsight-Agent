@@ -34,7 +34,6 @@ include = ["server*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-asyncio_mode = "auto"
 addopts = "-m \"not perf\""
 markers = [
   "perf: performance baseline tests (excluded from default pytest run; use `pytest -m perf`)",

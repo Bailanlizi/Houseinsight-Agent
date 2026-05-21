@@ -35,6 +35,12 @@ uvicorn server.main:app --reload --host 0.0.0.0 --port 8000
 
 指标说明见 [docs/METRICS.md](docs/METRICS.md)。SPEC §13 验收：`pytest tests/test_spec_success_criteria.py`。
 
+## CI
+
+推送/PR 到 `main` 时运行 [`.github/workflows/ci.yml`](.github/workflows/ci.yml)：`pip install -e ".[dev]"`、`ruff check server tests`、`pytest`（默认排除 `@pytest.mark.perf`）。
+
+性能基线夜间任务见 [`.github/workflows/perf.yml`](.github/workflows/perf.yml)（`pytest -m perf tests/perf/`，也可在 Actions 页手动 `workflow_dispatch`）。
+
 ## Web 前端（Vite + React）
 
 ```bash
